@@ -1,64 +1,93 @@
-import AdmZip from 'adm-zip';
+import fs from 'fs-extra';
 import path from 'path';
-import fs from 'fs';
+import AdmZip from 'adm-zip';
 import { parseFileToAST } from '../utils/astParser.js';
 
-export const handleZipUpload = async (req, res) => {
+export const parseZipFile = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a ZIP file.' });
+      return res.status(400).json({ error: 'කරුණාකර ZIP file එකක් upload කරන්න.' });
     }
 
     const zipPath = req.file.path;
-    const outputFolder = path.join('extracted', req.file.filename);
+    const extractDir = path.join('extracted', Date.now().toString());
 
-    // Extract ZIP
     const zip = new AdmZip(zipPath);
-    zip.extractAllTo(outputFolder, true);
+    zip.extractAllTo(extractDir, true);
 
-    // Node & Edge List Generation (Simple Graph Data)
     const nodes = [];
     const edges = [];
+    const filePathToIdMap = {};
+    const rawEdges = [];
+    let idCounter = 1;
 
-    const readFilesRecursively = (dir) => {
+    // Helper: Normalize relative path strings
+    const normalizePath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
+
+    const collectFiles = (dir) => {
       const files = fs.readdirSync(dir);
-
       files.forEach((file) => {
         const fullPath = path.join(dir, file);
         const stat = fs.statSync(fullPath);
 
-        // Ignore node_modules & hidden folders
-        if (file === 'node_modules' || file.startsWith('.')) return;
-
         if (stat.isDirectory()) {
-          readFilesRecursively(fullPath);
-        } else if (file.endsWith('.js') || file.endsWith('.jsx') || file.endsWith('.ts')) {
-          const relativePath = path.relative(outputFolder, fullPath);
+          if (file !== 'node_modules' && !file.startsWith('.')) {
+            collectFiles(fullPath);
+          }
+        } else if (/\.(js|jsx|ts|tsx)$/.test(file)) {
+          const relativePath = normalizePath(path.relative(extractDir, fullPath));
+          const nodeId = `node_${idCounter++}`;
+
+          // Save ID maps for different potential import syntax styles
+          filePathToIdMap[relativePath] = nodeId;
+          filePathToIdMap[relativePath.replace(/\.[^/.]+$/, "")] = nodeId;
+          filePathToIdMap[`${relativePath.replace(/\.[^/.]+$/, "")}/index`] = nodeId;
+
           nodes.push({
-            id: relativePath,
-            label: file,
-            status: 'safe', // default status
+            id: nodeId,
+            type: 'default',
+            data: { label: file },
+            position: { x: 0, y: 0 },
           });
 
-          // AST Parsing for dependencies
           const { imports } = parseFileToAST(fullPath);
           imports.forEach((imp) => {
-            edges.push({
-              source: relativePath,
-              target: imp,
-            });
+            if (imp.startsWith('.')) {
+              const currentDir = path.dirname(relativePath);
+              const resolvedImport = normalizePath(path.join(currentDir, imp));
+              rawEdges.push({ sourceId: nodeId, targetImport: resolvedImport });
+            }
           });
         }
       });
     };
 
-    readFilesRecursively(outputFolder);
+    collectFiles(extractDir);
 
-    return res.status(200).json({
-      message: 'ZIP parsed successfully',
-      graphData: { nodes, edges },
+    // Link source and target nodes via edges
+    rawEdges.forEach(({ sourceId, targetImport }) => {
+      const targetId = filePathToIdMap[targetImport];
+
+      if (targetId && sourceId !== targetId) {
+        edges.push({
+          id: `e_${sourceId}_${targetId}`,
+          source: sourceId,
+          target: targetId,
+          animated: true,
+          style: { stroke: '#818cf8', strokeWidth: 2 },
+        });
+      }
+    });
+
+    await fs.remove(zipPath);
+    await fs.remove(extractDir);
+
+    res.status(200).json({
+      success: true,
+      data: { nodes, edges },
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    console.error('Parsing error:', error);
+    res.status(500).json({ error: 'ZIP file එක parse කිරීමේදී දෝෂයක් සිදු විය.' });
   }
 };
