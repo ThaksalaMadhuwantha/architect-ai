@@ -9,7 +9,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import axios from 'axios';
 import dagre from '@dagrejs/dagre';
-import { UploadCloud, Cpu, FileCode, X, ArrowRightLeft, Code2 } from 'lucide-react';
+import { UploadCloud, Cpu, FileCode, X, ArrowRightLeft, Code2, Sparkles } from 'lucide-react';
 
 const getLayoutedElements = (nodes, edges) => {
   const dagreGraph = new dagre.graphlib.Graph();
@@ -62,6 +62,10 @@ export default function App() {
   const [fileName, setFileName] = useState('');
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // AI States
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -96,11 +100,34 @@ export default function App() {
 
   const onNodeClick = (_, node) => {
     setSelectedNode(node);
+    setAiAnalysis(''); // Clear previous analysis output
+  };
+
+  const handleAIAnalysis = async () => {
+    if (!selectedNode) return;
+
+    setAiLoading(true);
+    try {
+      const response = await axios.post('http://localhost:5000/api/v1/ai/analyze', {
+        fileName: selectedNode.data.label,
+        path: selectedNode.data.path,
+        codeSnippet: selectedNode.data.codeSnippet,
+      });
+
+      if (response.data.success) {
+        setAiAnalysis(response.data.analysis);
+      }
+    } catch (error) {
+      console.error('AI Analysis Error:', error);
+      alert('Groq AI Analysis ලබාගැනීමට නොහැකි විය. Backend Log පරීක්ෂා කරන්න.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
-      {/* Left Sidebar - Upload Controls */}
+      {/* Left Sidebar - Controls */}
       <aside className="w-80 border-r border-slate-800 bg-slate-900/50 p-6 flex flex-col justify-between backdrop-blur-md z-10">
         <div>
           <div className="flex items-center gap-3 mb-8">
@@ -138,7 +165,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main Graph Canvas */}
+      {/* Main Graph View */}
       <main className="flex-1 relative bg-slate-950 h-full">
         <ReactFlow
           nodes={nodes}
@@ -153,10 +180,10 @@ export default function App() {
         </ReactFlow>
       </main>
 
-      {/* Right Drawer - File Details & Code Preview */}
+      {/* Right Sidebar - File Details & Groq AI Audit */}
       {selectedNode && (
-        <aside className="w-96 border-l border-slate-800 bg-slate-900/95 p-6 flex flex-col justify-between backdrop-blur-md z-20 shadow-2xl transition-all">
-          <div className="space-y-6 overflow-y-auto">
+        <aside className="w-96 border-l border-slate-800 bg-slate-900/95 p-6 flex flex-col justify-between backdrop-blur-md z-20 shadow-2xl transition-all overflow-y-auto">
+          <div className="space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center gap-2 text-indigo-400">
                 <FileCode className="w-5 h-5" />
@@ -172,7 +199,30 @@ export default function App() {
               </button>
             </div>
 
-            {/* Path Details */}
+            {/* AI Audit Action Button */}
+            <button
+              onClick={handleAIAnalysis}
+              disabled={aiLoading}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-medium py-2.5 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              {aiLoading ? 'Analyzing Code with AI...' : 'Run Architecture AI Audit'}
+            </button>
+
+            {/* AI Output Result Box */}
+            {aiAnalysis && (
+              <div className="bg-indigo-950/40 border border-indigo-800/50 p-4 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-indigo-300 text-xs font-semibold uppercase tracking-wider">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  AI Architecture Insights
+                </div>
+                <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+                  {aiAnalysis}
+                </div>
+              </div>
+            )}
+
+            {/* File Path */}
             <div className="space-y-1">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 File Path
@@ -204,12 +254,12 @@ export default function App() {
               </div>
             </div>
 
-            {/* Code Preview */}
+            {/* Code Snippet */}
             <div className="space-y-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Code Snippet Preview
               </span>
-              <pre className="text-[11px] font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 text-slate-300 overflow-x-auto max-h-60 whitespace-pre-wrap">
+              <pre className="text-[11px] font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 text-slate-300 overflow-x-auto max-h-48 whitespace-pre-wrap">
                 {selectedNode.data.codeSnippet || '// No preview available'}
               </pre>
             </div>
