@@ -21,7 +21,6 @@ export const parseZipFile = async (req, res) => {
     const rawEdges = [];
     let idCounter = 1;
 
-    // Helper: Normalize relative path strings
     const normalizePath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
 
     const collectFiles = (dir) => {
@@ -38,19 +37,27 @@ export const parseZipFile = async (req, res) => {
           const relativePath = normalizePath(path.relative(extractDir, fullPath));
           const nodeId = `node_${idCounter++}`;
 
-          // Save ID maps for different potential import syntax styles
           filePathToIdMap[relativePath] = nodeId;
           filePathToIdMap[relativePath.replace(/\.[^/.]+$/, "")] = nodeId;
           filePathToIdMap[`${relativePath.replace(/\.[^/.]+$/, "")}/index`] = nodeId;
 
+          // Read file contents & AST metadata
+          const fileContent = fs.readFileSync(fullPath, 'utf-8');
+          const { imports, exports } = parseFileToAST(fullPath);
+
           nodes.push({
             id: nodeId,
             type: 'default',
-            data: { label: file },
+            data: { 
+              label: file,
+              path: relativePath,
+              importsCount: imports.length,
+              exportsList: exports || [],
+              codeSnippet: fileContent.slice(0, 1000), // First 1000 chars preview
+            },
             position: { x: 0, y: 0 },
           });
 
-          const { imports } = parseFileToAST(fullPath);
           imports.forEach((imp) => {
             if (imp.startsWith('.')) {
               const currentDir = path.dirname(relativePath);
@@ -64,7 +71,6 @@ export const parseZipFile = async (req, res) => {
 
     collectFiles(extractDir);
 
-    // Link source and target nodes via edges
     rawEdges.forEach(({ sourceId, targetImport }) => {
       const targetId = filePathToIdMap[targetImport];
 
