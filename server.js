@@ -3,9 +3,10 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDB } from './src/config/db.js';
 import parserRoutes from './src/routes/parserRoutes.js';
+import aiRoutes from './src/routes/aiRoutes.js';
 import dns from 'node:dns';
 
-dns.setServers(['8.8.8.8','1.1.1.1']);
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/v1/parser', parserRoutes);
+app.use('/api/v1/ai', aiRoutes);
 
 app.get('/', (req, res) => {
   res.send('ArchitectAI Express Engine Running...');
