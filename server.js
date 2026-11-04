@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { connectDB } from './src/config/db.js';
 import parserRoutes from './src/routes/parserRoutes.js';
 import aiRoutes from './src/routes/aiRoutes.js';
+import authRoutes from './src/routes/authRoutes.js';
 import dns from 'node:dns';
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
@@ -19,6 +20,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/parser', parserRoutes);
 app.use('/api/v1/ai', aiRoutes);
 
