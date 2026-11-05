@@ -69,6 +69,14 @@ export default function Workspace() {
   const [fileName, setFileName] = useState('');
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // Source: ZIP upload හෝ GitHub URL
+  const [source, setSource] = useState('github');
+  const [repoUrl, setRepoUrl] = useState('');
+  const [branch, setBranch] = useState('');
+  const [loadedRepo, setLoadedRepo] = useState('');
+  const [error, setError] = useState('');
+  const [truncated, setTruncated] = useState(false);
+
   // AI States
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -78,11 +86,31 @@ export default function Workspace() {
     navigate('/');
   };
 
+  const applyGraph = (data, meta) => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(data.nodes, data.edges);
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+    setSelectedNode(null);
+    setAiAnalysis('');
+    setTruncated(!!meta?.truncated);
+  };
+
+  const handleRequestError = (err, fallback) => {
+    console.error(err);
+    if (err.response?.status === 401) {
+      handleLogout();
+      return;
+    }
+    setError(err.response?.data?.error || fallback);
+  };
+
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     setFileName(file.name);
+    setLoadedRepo('');
+    setError('');
     setLoading(true);
 
     const formData = new FormData();
@@ -90,23 +118,32 @@ export default function Workspace() {
 
     try {
       const response = await api.post('/parser/upload', formData);
+      if (response.data.success) applyGraph(response.data.data, response.data.meta);
+    } catch (err) {
+      handleRequestError(err, 'ZIP File එක Upload කිරීමේදී දෝෂයක් සිදු විය.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  const handleGithubSubmit = async (e) => {
+    e.preventDefault();
+    if (!repoUrl.trim() || loading) return;
+
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await api.post('/parser/github', {
+        repoUrl: repoUrl.trim(),
+        branch: branch.trim() || undefined,
+      });
       if (response.data.success) {
-        const { nodes: rawNodes, edges: rawEdges } = response.data.data;
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-          rawNodes,
-          rawEdges
-        );
-        setNodes(layoutedNodes);
-        setEdges(layoutedEdges);
+        applyGraph(response.data.data, response.data.meta);
+        setLoadedRepo(response.data.meta?.repo || repoUrl.trim());
       }
-    } catch (error) {
-      console.error('File Upload Error:', error);
-      if (error.response?.status === 401) {
-        handleLogout();
-        return;
-      }
-      alert('ZIP File එක Upload කිරීමේදී දෝෂයක් සිදු විය.');
+    } catch (err) {
+      handleRequestError(err, 'GitHub repo එක analyze කිරීමේදී දෝෂයක් සිදු විය.');
     } finally {
       setLoading(false);
     }
@@ -153,26 +190,87 @@ export default function Workspace() {
             <h1 className="text-xl font-bold tracking-wider text-white">ArchitectAI</h1>
           </div>
 
-          <div className="space-y-6">
-            <div className="p-4 border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-xl text-center bg-slate-950/40 cursor-pointer relative">
-              <input
-                type="file"
-                accept=".zip"
-                onChange={handleFileUpload}
-                className="absolute inset-0 opacity-0 cursor-pointer"
-              />
-              <UploadCloud className="w-10 h-10 text-indigo-400 mx-auto mb-2" />
-              <p className="text-sm font-medium text-slate-300">
-                {fileName ? fileName : 'Upload Project ZIP'}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">.zip files supported</p>
+          <div className="space-y-5">
+            {/* Source tabs */}
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950/60 border border-slate-800 text-sm">
+              {[
+                { id: 'github', label: 'GitHub URL' },
+                { id: 'zip', label: 'ZIP Upload' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setSource(t.id); setError(''); }}
+                  className={`py-1.5 rounded-md transition-colors ${
+                    source === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
+
+            {source === 'zip' ? (
+              <div className="p-4 border-2 border-dashed border-slate-700 hover:border-indigo-500 transition-colors rounded-xl text-center bg-slate-950/40 cursor-pointer relative">
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={handleFileUpload}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+                <UploadCloud className="w-10 h-10 text-indigo-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-slate-300">
+                  {fileName ? fileName : 'Upload Project ZIP'}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">.zip files supported</p>
+              </div>
+            ) : (
+              <form onSubmit={handleGithubSubmit} className="space-y-3">
+                <input
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  placeholder="https://github.com/user/repo"
+                  className="w-full h-11 px-3 rounded-lg border border-slate-700 bg-slate-950/60 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-500"
+                />
+                <input
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="Branch (optional, default branch)"
+                  className="w-full h-10 px-3 rounded-lg border border-slate-800 bg-slate-950/40 text-xs text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !repoUrl.trim()}
+                  className="w-full h-11 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-sm font-medium disabled:opacity-50 transition-all"
+                >
+                  Analyze Repository
+                </button>
+                <p className="text-xs text-slate-500">Public repositories only.</p>
+              </form>
+            )}
 
             {loading && (
               <div className="flex items-center justify-center gap-2 text-indigo-400 text-sm">
                 <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
-                Analyzing AST Architecture...
+                {source === 'github' ? 'Downloading & analyzing repo...' : 'Analyzing AST Architecture...'}
               </div>
+            )}
+
+            {error && (
+              <p role="alert" className="text-sm text-red-300 bg-red-950/40 border border-red-900/60 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            {loadedRepo && !loading && !error && (
+              <p className="text-xs text-emerald-300 bg-emerald-950/30 border border-emerald-900/50 rounded-lg px-3 py-2 break-all">
+                Loaded: {loadedRepo}
+              </p>
+            )}
+
+            {truncated && !loading && (
+              <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                Project එක ලොකුයි, පළමු files 600 විතරයි graph එකේ පෙන්නන්නේ.
+              </p>
             )}
           </div>
         </div>
