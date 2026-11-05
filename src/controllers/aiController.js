@@ -1,26 +1,13 @@
-import Groq from 'groq-sdk';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import { askLLM, LLMError } from '../utils/llm.js';
 
 export const analyzeCodeWithAI = async (req, res) => {
-  try {
-    const { fileName, codeSnippet, path } = req.body;
+  const { fileName, codeSnippet, path } = req.body;
 
-    if (!codeSnippet) {
-      return res.status(400).json({ error: 'කරුණාකර Analyze කිරීමට Code එකක් ලබා දෙන්න.' });
-    }
+  if (!codeSnippet) {
+    return res.status(400).json({ success: false, error: 'කරුණාකර Analyze කිරීමට Code එකක් ලබා දෙන්න.' });
+  }
 
-    const apiKey = process.env.GROQ_API_KEY;
-
-    if (!apiKey) {
-      console.error('GROQ_API_KEY is missing!');
-      return res.status(500).json({ error: 'Groq API Key එක සොයාගත නොහැකි විය.' });
-    }
-
-    const groq = new Groq({ apiKey });
-
-    const prompt = `
+  const prompt = `
 You are an expert Senior Software Architect and Clean Code Specialist.
 Analyze the following source code file from a Web Application project:
 
@@ -29,7 +16,7 @@ File Path: ${path}
 
 Code Snippet:
 \`\`\`javascript
-${codeSnippet}
+${String(codeSnippet).slice(0, 12000)}
 \`\`\`
 
 Provide a structured, clear evaluation focusing on:
@@ -40,22 +27,15 @@ Provide a structured, clear evaluation focusing on:
 Keep the response concise, developer-friendly, and clearly formatted with bullet points.
 `;
 
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-    });
-
-    res.status(200).json({
-      success: true,
-      analysis: chatCompletion.choices[0]?.message?.content || '',
-    });
+  try {
+    const { text, model } = await askLLM([{ role: 'user', content: prompt }], { maxTokens: 1200 });
+    res.status(200).json({ success: true, analysis: text, model });
   } catch (error) {
-    console.error('Groq AI Analysis Error:', error);
-    res.status(500).json({ error: 'AI Analysis ලබාගැනීමේදී දෝෂයක් සිදු විය.' });
+    console.error('AI Analysis Error:', error);
+    const known = error instanceof LLMError;
+    res.status(known ? error.status : 500).json({
+      success: false,
+      error: known ? error.message : 'AI Analysis ලබාගැනීමේදී දෝෂයක් සිදු විය.',
+    });
   }
 };

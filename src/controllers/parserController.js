@@ -58,6 +58,7 @@ const buildGraphFromZip = async (zipPath) => {
     const rawEdges = [];
     let idCounter = 1;
     let truncated = false;
+    let codeBudget = 5 * 1024 * 1024; // response එකට යන full code වල මුළු සීමාව
 
     const collectFiles = (dir) => {
       const files = fs.readdirSync(dir);
@@ -84,6 +85,8 @@ const buildGraphFromZip = async (zipPath) => {
           filePathToIdMap[`${relativePath.replace(/\.[^/.]+$/, '')}/index`] = nodeId;
 
           const fileContent = fs.readFileSync(fullPath, 'utf-8');
+          const code = codeBudget > 0 ? fileContent.slice(0, 20000) : '';
+          codeBudget -= code.length;
 
           // Parse කරන්න බැරි file එකක් නිසා මුළු repo එකම fail වෙන්න දෙන්නේ නෑ
           let imports = [];
@@ -105,6 +108,8 @@ const buildGraphFromZip = async (zipPath) => {
               importsCount: imports.length,
               exportsList: exports,
               codeSnippet: fileContent.slice(0, 1000),
+              code,
+              lines: fileContent.split('\n').length,
             },
             position: { x: 0, y: 0 },
           });
