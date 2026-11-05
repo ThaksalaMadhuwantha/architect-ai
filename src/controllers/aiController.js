@@ -47,7 +47,7 @@ Keep the response concise, developer-friendly, and clearly formatted with bullet
           content: prompt,
         },
       ],
-      model: 'llama-3.1-8b-instant',
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
     });
 
     res.status(200).json({
