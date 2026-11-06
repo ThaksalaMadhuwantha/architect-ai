@@ -27,6 +27,24 @@ const preferredModels = () =>
 // Reasoning models සමහරක් <think>...</think> කොටසක් එක්කම යවනවා
 const clean = (text) => text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
+// Model එක එකම වචනය/වාක්‍ය ඛණ්ඩය නැවත නැවත ලියන loop එකක හිරවුණාද බලනවා (Sinhala/Tamil වල සමහර models වලට වෙනවා)
+const isDegenerate = (text) => {
+  const w = text.split(/\s+/).filter(Boolean);
+  let run = 1;
+  const grams = new Map();
+  for (let i = 1; i < w.length; i++) {
+    run = w[i] === w[i - 1] ? run + 1 : 1;
+    if (run >= 6) return true;
+    if (i >= 3) {
+      const g = w.slice(i - 3, i + 1).join(' ');
+      const c = (grams.get(g) || 0) + 1;
+      grams.set(g, c);
+      if (c >= 5 && g.length > 12) return true;
+    }
+  }
+  return false;
+};
+
 /* ---------- දැනට live free models ---------- */
 let cache = { at: 0, list: null };
 
@@ -74,7 +92,7 @@ export const resolveModels = async () => {
 };
 
 /* ---------- එක model එකකට එක request එකක් (කවදාවත් throw කරන්නේ නෑ) ---------- */
-const callModel = async (apiKey, model, messages, { maxTokens, temperature }) => {
+const callModel = async (apiKey, model, messages, { maxTokens, temperature, extra }) => {
   let response;
   try {
     response = await fetch(CHAT_URL, {
@@ -84,7 +102,7 @@ const callModel = async (apiKey, model, messages, { maxTokens, temperature }) =>
         'Content-Type': 'application/json',
         'X-Title': 'ArchitectAI',
       },
-      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, ...extra }),
       signal: AbortSignal.timeout(60000),
     });
   } catch (err) {
@@ -96,9 +114,10 @@ const callModel = async (apiKey, model, messages, { maxTokens, temperature }) =>
 
   if (response.ok && !data?.error) {
     const text = clean(data?.choices?.[0]?.message?.content || '');
-    return text
-      ? { status: 200, text, model: data.model || model }
-      : { status: 502, message: 'empty response' };
+    const finish = data?.choices?.[0]?.finish_reason;
+    if (!text) return { status: 502, message: `empty response (finish: ${finish})` };
+    if (isDegenerate(text)) return { status: 502, message: 'repetitive output' };
+    return { status: 200, text, model: data.model || model };
   }
 
   return {
@@ -107,11 +126,21 @@ const callModel = async (apiKey, model, messages, { maxTokens, temperature }) =>
   };
 };
 
-export const askLLM = async (messages, { maxTokens = 1500, temperature = 0.2 } = {}) => {
+export const askLLM = async (
+  messages,
+  { maxTokens = 1500, temperature = 0.2, prefer, exclude, retry429 = 0, extra } = {}
+) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new LLMError(500, 'OPENROUTER_API_KEY එක .env file එකේ නැහැ.');
 
-  const models = await resolveModels();
+  let models = await resolveModels();
+  // prefer: මේ pattern එකට ගැලපෙන models මුලට (උදා: බහුභාෂා වලට Gemma)
+  // exclude: මේ pattern එකට ගැලපෙන models ඉවත් කරනවා (උදා: translation වලට code-specialized models)
+  if (exclude) {
+    const kept = models.filter((m) => !exclude.test(m));
+    if (kept.length) models = kept;
+  }
+  if (prefer) models = [...models.filter((m) => prefer.test(m)), ...models.filter((m) => !prefer.test(m))];
   if (models.length === 0) {
     throw new LLMError(503, 'දැනට භාවිතා කළ හැකි free AI model එකක් හොයාගන්න බැරි වුණා.');
   }
@@ -120,7 +149,14 @@ export const askLLM = async (messages, { maxTokens = 1500, temperature = 0.2 } =
   const failures = [];
 
   for (const model of models) {
-    const r = await callModel(apiKey, model, messages, { maxTokens, temperature });
+    let r = await callModel(apiKey, model, messages, { maxTokens, temperature, extra });
+
+    // Shared free pool එක තාවකාලිකව busy නම් තත්පර 4ක් ඉඳලා එකම model එක නැවත try කරනවා
+    for (let n = 0; n < retry429 && r.status === 429 && !/per[- ]?day|daily/i.test(String(r.message)); n++) {
+      console.warn(`Rate limited: ${model}, තත්පර 4කින් නැවත උත්සාහ කරනවා...`);
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      r = await callModel(apiKey, model, messages, { maxTokens, temperature, extra });
+    }
 
     if (r.status === 200) {
       console.log(`AI answered with: ${r.model}`);
