@@ -90,6 +90,8 @@ function TreeFolder({ name, node, depth, selectedId, onSelect }) {
   );
 }
 
+const LANGS = [['en', 'English'], ['si', 'සිංහල'], ['ta', 'தமிழ்'], ['hi', 'हिन्दी']];
+
 const AGENTS = [
   { id: 'arch', label: 'Architecture', icon: Network, ready: true },
   { id: 'sec', label: 'Security', icon: ShieldCheck, ready: false },
@@ -116,11 +118,15 @@ export default function Workspace() {
   const [truncated, setTruncated] = useState(false);
 
   // AI
-  const [analyses, setAnalyses] = useState({});
+  const [analyses, setAnalyses] = useState({}); // { [fileId]: { en, si, ta, hi } }
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [lang, setLang] = useState('en');
+  const [translating, setTranslating] = useState(false);
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
-  const aiAnalysis = analyses[selectedId] || '';
+  const analysis = analyses[selectedId] || {};
+  const aiAnalysis = analysis[lang] || '';
   const tree = useMemo(() => buildTree(nodes), [nodes]);
   const matches = query.trim()
     ? nodes.filter((n) => n.data.path.toLowerCase().includes(query.trim().toLowerCase()))
@@ -145,6 +151,8 @@ export default function Workspace() {
 
   const selectFile = (id) => {
     setSelectedId(id);
+    setLang('en');
+    setAiError('');
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
   };
 
@@ -201,18 +209,49 @@ export default function Workspace() {
     if (!selectedNode) return;
     const id = selectedNode.id;
     setAiLoading(true);
+    setAiError('');
     try {
       const res = await api.post('/ai/analyze', {
         fileName: selectedNode.data.label,
         path: selectedNode.data.path,
         codeSnippet: (selectedNode.data.code || selectedNode.data.codeSnippet || '').slice(0, 4000),
       });
-      if (res.data.success) setAnalyses((a) => ({ ...a, [id]: res.data.analysis }));
+      if (res.data.success) {
+        setAnalyses((a) => ({ ...a, [id]: { en: res.data.analysis } }));
+        setLang('en');
+      }
     } catch (err) {
       if (err.response?.status === 401) return handleLogout();
-      setAnalyses((a) => ({ ...a, [id]: err.response?.data?.error || 'AI Analysis ලබාගැනීමට නොහැකි විය. Backend log පරීක්ෂා කරන්න.' }));
+      setAiError(err.response?.data?.error || 'AI Analysis ලබාගැනීමට නොහැකි විය. Backend log පරීක්ෂා කරන්න.');
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  // භාෂාව මාරු කරනවා. තවම translate කරලා නැත්නම් විතරක් request එකක් යවනවා (cache කරනවා)
+  const handleLang = async (code, force = false) => {
+    setLang(code);
+    setAiError('');
+    if (code === 'en' || !selectedNode || (analysis[code] && !force)) return;
+
+    const id = selectedNode.id;
+    setTranslating(true);
+    try {
+      const res = await api.post('/ai/translate', { text: analysis.en, language: code });
+      if (res.data.success) {
+        setAnalyses((a) => ({ ...a, [id]: { ...a[id], [code]: res.data.translation } }));
+      }
+    } catch (err) {
+      if (err.response?.status === 401) return handleLogout();
+      setAiError(
+        err.response?.data?.error ||
+          (err.response
+            ? `Translate request එක fail වුණා (HTTP ${err.response.status}). Backend එකේ අලුත් files දාලා restart කළාද බලන්න.`
+            : 'Backend එකට සම්බන්ධ වෙන්න බැරි වුණා.')
+      );
+      setLang('en');
+    } finally {
+      setTranslating(false);
     }
   };
 
@@ -346,7 +385,7 @@ export default function Workspace() {
             )}
             <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
               onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-              onNodeClick={(_, n) => setSelectedId(n.id)} fitView proOptions={{ hideAttribution: true }}>
+              onNodeClick={(_, n) => selectFile(n.id)} fitView proOptions={{ hideAttribution: true }}>
               <Background color="#334155" gap={18} />
               <Controls />
             </ReactFlow>
@@ -405,10 +444,37 @@ export default function Workspace() {
                 {aiLoading ? 'Analyzing Code with AI...' : 'Run Architecture AI Audit'}
               </button>
 
-              {aiAnalysis && (
+              {aiError && (
+                <p role="alert" className="text-sm text-red-300 bg-red-950/40 border border-red-900/60 rounded-lg px-3 py-2">{aiError}</p>
+              )}
+
+              {analysis.en && (
                 <div className="bg-indigo-950/40 border border-indigo-800/50 p-3 rounded-xl">
                   <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-2">AI Architecture Insights</p>
-                  <Markdown text={aiAnalysis} />
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {LANGS.map(([code, label]) => (
+                      <button key={code} onClick={() => handleLang(code)} disabled={translating}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors disabled:opacity-60 ${
+                          lang === code ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-500'
+                        }`}>
+                        {label}
+                      </button>
+                    ))}
+                    {lang !== 'en' && !translating && (
+                      <button onClick={() => handleLang(lang, true)} title="නැවත translate කරන්න (free request එකක් වැය වෙනවා)"
+                        className="ml-auto px-2.5 py-1 rounded-md text-xs border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500">
+                        ↻ Retry
+                      </button>
+                    )}
+                  </div>
+                  {translating ? (
+                    <div className="flex items-center gap-2 text-indigo-300 text-xs">
+                      <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                      Translating...
+                    </div>
+                  ) : (
+                    <Markdown text={aiAnalysis} />
+                  )}
                 </div>
               )}
 
