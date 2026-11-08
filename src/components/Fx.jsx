@@ -104,7 +104,7 @@ export function ParticleField() {
         }
         const dm = Math.hypot(pts[i].x - mouse.x, pts[i].y - mouse.y);
         if (dm < 170) {
-          ctx.strokeStyle = `rgba(167,139,250,${(1 - dm / 170) * 0.6})`;
+          ctx.strokeStyle = `rgba(129,140,248,${(1 - dm / 170) * 0.6})`;
           ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
         }
       }

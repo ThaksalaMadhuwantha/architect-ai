@@ -4,9 +4,9 @@ export default function Logo({ size = 36, text = true }) {
       <svg width={size} height={size} viewBox="0 0 48 48" fill="none">
         <defs>
           <linearGradient id="logoGrad" x1="6" y1="44" x2="42" y2="4">
-            <stop stopColor="#6366f1" />
-            <stop offset="0.55" stopColor="#8b5cf6" />
-            <stop offset="1" stopColor="#ec4899" />
+            <stop stopColor="#3b82f6" />
+            <stop offset="0.6" stopColor="#6366f1" />
+            <stop offset="1" stopColor="#818cf8" />
           </linearGradient>
         </defs>
         <path

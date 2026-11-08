@@ -25,7 +25,7 @@ const inline = (text) =>
 const cells = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
 const isSeparator = (line) => cells(line).every((c) => /^:?-{2,}:?$/.test(c));
 
-export default function Markdown({ text }) {
+export default function Markdown({ text, large = false }) {
   const lines = text.split('\n');
   const out = [];
 
@@ -74,7 +74,7 @@ export default function Markdown({ text }) {
     const h = line.match(/^\s*#{1,4}\s+(.*)/) || line.match(/^\s*\*\*([^*]+)\*\*:?\s*$/);
     if (h) {
       out.push(
-        <p key={i} className="pt-1.5 text-sm font-semibold text-indigo-200">
+        <p key={i} className={`pt-1.5 font-semibold text-indigo-200 ${large ? 'text-base' : 'text-sm'}`}>
           {inline(h[1].replace(/\*\*/g, ''))}
         </p>
       );
@@ -96,5 +96,5 @@ export default function Markdown({ text }) {
     out.push(<p key={i}>{inline(line.trim())}</p>);
   }
 
-  return <div className="space-y-1.5 text-xs leading-relaxed text-slate-300 break-words">{out}</div>;
+  return <div className={`space-y-1.5 leading-relaxed text-slate-300 break-words ${large ? 'text-sm' : 'text-xs'}`}>{out}</div>;
 }

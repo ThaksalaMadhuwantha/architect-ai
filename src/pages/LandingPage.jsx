@@ -145,8 +145,8 @@ const FEATURES = [
 ];
 const ACCENTS = {
   indigo: 'bg-indigo-500/15 border-indigo-400/40 text-indigo-300',
-  emerald: 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300',
-  sky: 'bg-sky-500/15 border-sky-400/40 text-sky-300',
+  emerald: 'bg-indigo-500/15 border-indigo-400/40 text-indigo-300',
+  sky: 'bg-indigo-500/15 border-indigo-400/40 text-indigo-300',
 };
 
 export default function LandingPage() {
@@ -168,22 +168,22 @@ export default function LandingPage() {
 
       {/* Navbar */}
       <header className="sticky top-0 z-40 px-4 pt-3 bg-[#050816]/70 backdrop-blur">
-        <nav className="max-w-7xl mx-auto flex items-center justify-between rounded-xl border border-blue-500/30 bg-[#070c24]/90 px-5 py-3">
+        <nav className="max-w-7xl mx-auto flex items-center justify-between rounded-xl border border-blue-500/30 bg-[#070c24]/90 px-3 sm:px-5 py-3">
           <Logo size={34} />
           <div className="hidden md:flex items-center gap-8 text-sm text-slate-300">
-            <a href="#features" className="nav-link flex items-center gap-2 hover:text-white"><Sparkles className="w-4 h-4 text-violet-400" /> Features</a>
+            <a href="#features" className="nav-link flex items-center gap-2 hover:text-white"><Sparkles className="w-4 h-4 text-indigo-300" /> Features</a>
             <span title="Coming soon" className="nav-link flex items-center gap-2 cursor-default"><Tag className="w-4 h-4" /> Pricing</span>
             <span title="Coming soon" className="nav-link flex items-center gap-2 cursor-default"><BookOpen className="w-4 h-4" /> Docs</span>
           </div>
           <div className="flex items-center gap-3">
             {user ? (
-              <MagneticButton onClick={() => navigate('/app')} className="h-10 px-5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium flex items-center gap-2">
+              <MagneticButton onClick={() => navigate('/app')} className="h-10 px-3 sm:px-5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium flex items-center gap-2">
                 Open Workspace <ArrowRight className="w-4 h-4" />
               </MagneticButton>
             ) : (
               <>
-                <MagneticButton onClick={() => openAuth('signin')} className="h-10 px-5 rounded-lg border border-blue-500/50 text-sm hover:bg-blue-500/10">Sign In</MagneticButton>
-                <MagneticButton onClick={() => openAuth('signup')} className="btn-glow h-10 px-5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium flex items-center gap-2">
+                <MagneticButton onClick={() => openAuth('signin')} className="h-10 px-3 sm:px-5 rounded-lg border border-blue-500/50 text-sm hover:bg-blue-500/10">Sign In</MagneticButton>
+                <MagneticButton onClick={() => openAuth('signup')} className="btn-glow h-10 px-3 sm:px-5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium flex items-center gap-2">
                   Get Started <ArrowRight className="w-4 h-4" />
                 </MagneticButton>
               </>
@@ -195,14 +195,14 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="relative z-10 max-w-7xl mx-auto px-6 pt-14 pb-20 grid lg:grid-cols-2 gap-12 items-center">
         <div className="aurora -z-10 w-[420px] h-[420px] bg-blue-600 -top-10 -left-24" />
-        <div className="aurora -z-10 w-[380px] h-[380px] bg-fuchsia-600 top-40 right-0" style={{ animationDelay: '-6s' }} />
+        <div className="aurora -z-10 w-[380px] h-[380px] bg-indigo-500 top-40 right-0" style={{ animationDelay: '-6s' }} />
 
         <div>
           <div className="shine inline-flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3.5 py-1.5 text-sm text-slate-200">
             <Rocket className="w-4 h-4 text-blue-300" /> AI-Powered Code Architecture Analysis &amp; Refactoring
           </div>
 
-          <h1 className="mt-6 text-5xl md:text-6xl font-extrabold leading-[1.08] tracking-tight">
+          <h1 className="mt-6 text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.08] tracking-tight">
             <Words text="Understand Your Code." />
             <br />
             <Words text="Build a Better Tomorrow." start={420} className="gradient-text" />
@@ -223,7 +223,7 @@ export default function LandingPage() {
             </div>
             <ul className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-400">
               {['No credit card required', 'Free tier available', 'Get started in minutes'].map((t) => (
-                <li key={t} className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-400" /> {t}</li>
+                <li key={t} className="flex items-center gap-1.5"><Check className="w-4 h-4 text-indigo-300" /> {t}</li>
               ))}
             </ul>
           </Reveal>
@@ -259,7 +259,7 @@ export default function LandingPage() {
                 </div>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-300">
                   {points.map((p) => (
-                    <li key={p} className="flex items-center gap-2.5"><Check className="w-4 h-4 text-emerald-400" /> {p}</li>
+                    <li key={p} className="flex items-center gap-2.5"><Check className="w-4 h-4 text-indigo-300" /> {p}</li>
                   ))}
                 </ul>
               </TiltCard>

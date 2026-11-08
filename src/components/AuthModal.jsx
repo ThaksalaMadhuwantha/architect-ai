@@ -66,7 +66,7 @@ export default function AuthModal({ open, mode, setMode, onClose }) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative w-full max-w-3xl grid md:grid-cols-2 rounded-2xl overflow-hidden border border-blue-500/40 bg-[#070b1f] shadow-[0_0_60px_rgba(59,89,255,0.25)]">
+      <div className="relative w-full max-w-3xl grid md:grid-cols-2 rounded-2xl overflow-y-auto max-h-[92vh] border border-blue-500/40 bg-[#070b1f] shadow-[0_0_60px_rgba(59,89,255,0.25)]">
         {/* Left panel */}
         <div className="hidden md:flex flex-col justify-between p-8 bg-gradient-to-b from-[#0a1030] to-[#0b1a5c]/60 border-r border-blue-500/30">
           <div>
