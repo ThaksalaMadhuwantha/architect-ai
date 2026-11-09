@@ -4,6 +4,7 @@ import AdmZip from 'adm-zip';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parseFileToAST } from '../utils/astParser.js';
+import { scanSource, scanRepoLevel, summarize, topSeverity } from '../utils/securityScanner.js';
 
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // GitHub ZIP එකේ උපරිම size (50MB)
 const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024; // extract කළාම උපරිම size
@@ -59,6 +60,7 @@ const buildGraphFromZip = async (zipPath) => {
     let idCounter = 1;
     let truncated = false;
     let codeBudget = 5 * 1024 * 1024; // response එකට යන full code වල මුළු සීමාව
+    const scanEntries = []; // security scan ප්‍රතිඵල
 
     const collectFiles = (dir) => {
       const files = fs.readdirSync(dir);
@@ -99,6 +101,9 @@ const buildGraphFromZip = async (zipPath) => {
             console.warn(`AST parse skipped: ${relativePath} (${err.message})`);
           }
 
+          const scanResult = scanSource(fileContent, relativePath);
+          scanEntries.push({ nodeId, path: relativePath, findings: scanResult.findings, meta: scanResult.meta });
+
           nodes.push({
             id: nodeId,
             type: 'default',
@@ -110,6 +115,8 @@ const buildGraphFromZip = async (zipPath) => {
               codeSnippet: fileContent.slice(0, 1000),
               code,
               lines: fileContent.split('\n').length,
+              findings: scanResult.findings,
+              severity: '',
             },
             position: { x: 0, y: 0 },
           });
@@ -126,6 +133,11 @@ const buildGraphFromZip = async (zipPath) => {
     };
 
     collectFiles(extractDir);
+
+    // Repo මට්ටමේ rules, ඊට පස්සේ node එකක් ගානේ බරපතලම severity එක සහ සාරාංශය
+    scanRepoLevel(scanEntries);
+    nodes.forEach((n) => { n.data.severity = topSeverity(n.data.findings); });
+    const scan = { ...summarize(scanEntries.flatMap((e) => e.findings)), filesScanned: nodes.length };
 
     const seen = new Set();
     rawEdges.forEach(({ sourceId, targetImport }) => {
@@ -144,7 +156,7 @@ const buildGraphFromZip = async (zipPath) => {
       }
     });
 
-    return { nodes, edges, truncated };
+    return { nodes, edges, truncated, scan };
   } finally {
     await fs.remove(extractDir);
   }
@@ -157,8 +169,8 @@ export const parseZipFile = async (req, res) => {
   }
 
   try {
-    const { nodes, edges, truncated } = await buildGraphFromZip(req.file.path);
-    res.status(200).json({ success: true, data: { nodes, edges }, meta: { truncated } });
+    const { nodes, edges, truncated, scan } = await buildGraphFromZip(req.file.path);
+    res.status(200).json({ success: true, data: { nodes, edges }, meta: { truncated, scan } });
   } catch (error) {
     sendError(res, error, 'ZIP file එක parse කිරීමේදී දෝෂයක් සිදු විය.');
   } finally {
@@ -247,7 +259,7 @@ export const parseGithubRepo = async (req, res) => {
 
   try {
     await downloadRepoZip(target, zipPath);
-    const { nodes, edges, truncated } = await buildGraphFromZip(zipPath);
+    const { nodes, edges, truncated, scan } = await buildGraphFromZip(zipPath);
 
     if (nodes.length === 0) {
       throw new HttpError(422, 'මේ repo එකේ JS/TS files (.js, .jsx, .ts, .tsx) හොයාගන්න බැරි වුණා.');
@@ -256,7 +268,7 @@ export const parseGithubRepo = async (req, res) => {
     res.status(200).json({
       success: true,
       data: { nodes, edges },
-      meta: { source: 'github', repo: `${target.owner}/${target.repo}`, truncated },
+      meta: { source: 'github', repo: `${target.owner}/${target.repo}`, truncated, scan },
     });
   } catch (error) {
     sendError(res, error, 'GitHub repo එක analyze කිරීමේදී දෝෂයක් සිදු විය.');
