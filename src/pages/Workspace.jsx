@@ -44,19 +44,42 @@ const getLayoutedElements = (nodes, edges) => {
 };
 
 function FileNode({ data }) {
+  const n = data.findings ? data.findings.length : 0;
+  const sev = data.severity || (data.findings ? 'safe' : '');
   return (
-    <div className="file-node">
+    <div className={`file-node ${sev ? `sev-${sev}` : ''}`}>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <FileCode className="w-5 h-5 text-indigo-300 shrink-0" />
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold">{data.label}</p>
         <p className="truncate text-[10px] text-slate-500">{data.folder}</p>
       </div>
+      {n > 0 && <span className={`sev-badge sev-badge-${data.severity}`}>{n}</span>}
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
     </div>
   );
 }
 const nodeTypes = { file: FileNode };
+
+function ScoreRing({ score }) {
+  const r = 26, c = 2 * Math.PI * r;
+  const color = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444';
+  return (
+    <svg width="68" height="68" viewBox="0 0 68 68" className="shrink-0">
+      <circle cx="34" cy="34" r={r} fill="none" stroke="#1e293b" strokeWidth="6" />
+      <circle cx="34" cy="34" r={r} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+        strokeDasharray={`${(score / 100) * c} ${c}`} transform="rotate(-90 34 34)" />
+      <text x="34" y="39" textAnchor="middle" fontSize="16" fontWeight="700" fill="#f1f5f9">{score}</text>
+    </svg>
+  );
+}
+
+const SEV_ORDER = { high: 0, medium: 1, low: 2 };
+const SEV_STYLE = {
+  high: 'bg-red-500/15 text-red-300 border-red-500/40',
+  medium: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+  low: 'bg-slate-500/15 text-slate-300 border-slate-500/40',
+};
 
 /* ---------- File tree ---------- */
 const buildTree = (nodes, root) => {
@@ -103,7 +126,7 @@ const LANGS = [['en', 'English'], ['si', 'සිංහල'], ['ta', 'தமி�
 
 const AGENTS = [
   { id: 'arch', label: 'Architecture', icon: Network, ready: true },
-  { id: 'sec', label: 'Security', icon: ShieldCheck, ready: false },
+  { id: 'sec', label: 'Security', icon: ShieldCheck, ready: true },
   { id: 'ref', label: 'Refactor', icon: Wrench, ready: false },
 ];
 
@@ -138,12 +161,27 @@ export default function Workspace() {
   const [translating, setTranslating] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
 
+  // Security scan
+  const [agent, setAgent] = useState('arch');
+  const [scan, setScan] = useState(null);
+  const [onlyFile, setOnlyFile] = useState(false);
+  const [focusLine, setFocusLine] = useState(null);
+  const focusRef = useRef(null);
+
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
   const analysis = analyses[selectedId] || {};
   const aiAnalysis = analysis[lang] || '';
   const root = useMemo(() => commonRoot(nodes), [nodes]);
   const tree = useMemo(() => buildTree(nodes, root), [nodes, root]);
   const short = (p) => p.slice(root.length);
+  const allFindings = useMemo(
+    () =>
+      nodes
+        .flatMap((n) => (n.data.findings || []).map((f) => ({ ...f, nodeId: n.id, file: n.data.path.slice(root.length) })))
+        .sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]),
+    [nodes, root]
+  );
+  const shownFindings = onlyFile && selectedNode ? allFindings.filter((f) => f.nodeId === selectedNode.id) : allFindings;
   const matches = query.trim()
     ? nodes.filter((n) => n.data.path.toLowerCase().includes(query.trim().toLowerCase()))
     : null;
@@ -157,6 +195,10 @@ export default function Workspace() {
     });
     return { files: nodes.length, loc: nodes.reduce((s, n) => s + (n.data.lines || 0), 0), deps: edges.length, hub };
   }, [nodes, edges]);
+
+  useEffect(() => {
+    if (focusLine && focusRef.current) focusRef.current.scrollIntoView({ block: 'center' });
+  }, [focusLine, selectedId]);
 
   // පිටතින් click කළාම / Esc ඔබපුවාම dropdown සහ modal වැහෙනවා
   useEffect(() => {
@@ -181,6 +223,7 @@ export default function Workspace() {
     setSelectedId(id);
     setLang('en');
     setAiError('');
+    setFocusLine(null);
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
     if (window.innerWidth < 1024) setMobileTab('code');
   };
@@ -192,6 +235,8 @@ export default function Workspace() {
     setSelectedId(null);
     setAnalyses({});
     setTruncated(!!meta?.truncated);
+    setScan(meta?.scan || null);
+    setAgent(meta?.scan ? 'sec' : 'arch');
     setProjectName(name);
     setLoadOpen(false);
     setMobileTab('graph');
@@ -284,6 +329,97 @@ export default function Workspace() {
       setTranslating(false);
     }
   };
+
+  const openFinding = (f) => {
+    selectFile(f.nodeId);
+    setFocusLine(f.line);
+  };
+  const lineSev = {};
+  (selectedNode?.data.findings || []).forEach((f) => {
+    if (!lineSev[f.line] || SEV_ORDER[f.severity] < SEV_ORDER[lineSev[f.line]]) lineSev[f.line] = f.severity;
+  });
+
+  // එකම rule එකේ findings එකට කණ්ඩායම් කරනවා (rule එකේ විස්තරය එක පාරයි, ස්ථාන වෙන වෙනම)
+  const groups = Object.values(
+    shownFindings.reduce((m, f) => {
+      (m[f.rule] ||= { rule: f.rule, title: f.title, cwe: f.cwe, fix: f.fix, severity: f.severity, items: [] }).items.push(f);
+      return m;
+    }, {})
+  ).sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity] || b.items.length - a.items.length);
+
+  const securityPanel = !scan ? (
+    <p className="text-sm text-slate-500">Project එකක් load කළාම security scan එක ඉබේම run වෙනවා.</p>
+  ) : (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+        <ScoreRing score={scan.score} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Security Health: {scan.label}</p>
+          <p className="text-xs text-slate-400">{scan.filesScanned} files scanned · {scan.total} findings</p>
+          <div className="flex gap-1.5 mt-1.5 text-[11px]">
+            {['high', 'medium', 'low'].map((k) => (
+              <span key={k} className={`px-1.5 py-0.5 rounded border capitalize ${SEV_STYLE[k]}`}>{k} {scan.counts[k]}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500">
+        Score = 100 − (High×10 + Medium×4 + Low×1). Rule-based scan (AST), AI නැතුව, නොමිලේ.
+      </p>
+
+      {selectedNode && (
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950/60 border border-slate-800 text-xs">
+          {[[false, 'All files'], [true, 'This file']].map(([v, label]) => (
+            <button key={label} onClick={() => setOnlyFile(v)}
+              className={`py-1.5 rounded-md ${onlyFile === v ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {groups.length === 0 ? (
+        <p className="text-sm text-slate-400 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+          No issues found by the current rules. මෙය ආරක්ෂාවේ සහතිකයක් නෙවෙයි, rules ගණන සීමිතයි.
+        </p>
+      ) : (
+        groups.map((g) => (
+          <div key={g.rule} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase ${SEV_STYLE[g.severity]}`}>{g.severity}</span>
+              <span className="text-sm font-medium">{g.title}</span>
+              <span className="ml-auto text-[11px] text-slate-400">{g.items.length} {g.items.length === 1 ? 'place' : 'places'}</span>
+            </div>
+            <p className="text-[11px] text-indigo-300">{g.cwe}</p>
+            <p className="text-xs text-emerald-300/90">{g.fix}</p>
+
+            <div className="space-y-1.5">
+              {g.items.map((f) => (
+                <div key={`${f.nodeId}-${f.line}`} className="rounded-md border border-slate-800 bg-slate-900/60">
+                  <button onClick={() => openFinding(f)} className="w-full text-left px-2.5 py-2 space-y-1">
+                    <p className="text-[11px] text-indigo-300 break-all">{f.file}:{f.line}</p>
+                    {f.snippet && <code className="block text-[11px] text-slate-300 break-all">{f.snippet}</code>}
+                  </button>
+                  <details className="px-2.5 pb-2">
+                    <summary className="text-xs text-indigo-300 cursor-pointer">What&apos;s wrong here &amp; suggested change</summary>
+                    <div className="mt-1.5"><Markdown text={f.message} /></div>
+                    {f.trace && f.trace.length > 1 && (
+                      <p className="mt-2 text-[11px] text-slate-400 break-all">
+                        Data flow: <span className="text-slate-200">{f.trace.join('  →  ')}</span>
+                      </p>
+                    )}
+                    {f.example && (
+                      <pre className="mt-2 text-[11px] text-emerald-200 bg-slate-950 border border-slate-800 rounded p-2 whitespace-pre-wrap break-all">{f.example}</pre>
+                    )}
+                  </details>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
   const codeLines = (selectedNode?.data.code || selectedNode?.data.codeSnippet || '').split('\n');
   const panel = 'rounded-xl border border-blue-500/20 bg-[#070c24]';
@@ -453,6 +589,13 @@ export default function Workspace() {
             <div className="absolute top-3 left-4 z-10 flex items-center gap-2 text-sm font-semibold pointer-events-none">
               <Network className="w-4 h-4 text-blue-300" /> Dependency Graph
             </div>
+            {scan && (
+              <div className="absolute top-3 right-4 z-10 hidden sm:flex items-center gap-3 text-[11px] text-slate-400 pointer-events-none">
+                <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-emerald-500" /> Safe</span>
+                <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-amber-500" /> Needs attention</span>
+                <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-red-500" /> Vulnerability</span>
+              </div>
+            )}
             {nodes.length === 0 && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 px-6 text-center text-slate-400 text-sm">
                 Load a project to see its architecture
@@ -482,7 +625,10 @@ export default function Workspace() {
             <div className="flex-1 min-h-0 overflow-auto py-2 font-mono text-[12px] leading-5">
               {selectedNode
                 ? codeLines.map((l, i) => (
-                    <div key={i} className="flex">
+                    <div key={i} ref={focusLine === i + 1 ? focusRef : null}
+                      className={`flex border-l-2 ${
+                        lineSev[i + 1] === 'high' ? 'border-red-500 bg-red-500/10' : lineSev[i + 1] ? 'border-amber-500 bg-amber-500/10' : 'border-transparent'
+                      } ${focusLine === i + 1 ? 'ring-1 ring-inset ring-indigo-400' : ''}`}>
                       <span className="w-12 shrink-0 text-right pr-4 text-slate-600 select-none">{i + 1}</span>
                       <span className="whitespace-pre text-slate-300">{l}</span>
                     </div>
@@ -503,14 +649,16 @@ export default function Workspace() {
         <aside className={`${panel} ${mobileTab === 'ai' ? 'block' : 'hidden'} lg:block flex-1 lg:flex-none min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4`}>
           <div className="flex gap-2">
             {AGENTS.map(({ id, label, icon: Icon, ready }) => (
-              <div key={id} title={ready ? label : 'Coming soon'}
-                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs flex items-center justify-center gap-1.5 ${ready ? 'border-blue-500/60 bg-blue-500/10' : 'border-slate-800 text-slate-500'}`}>
+              <button key={id} disabled={!ready} onClick={() => setAgent(id)} title={ready ? label : 'Coming soon'}
+                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                  !ready ? 'border-slate-800 text-slate-500' : agent === id ? 'border-blue-500/60 bg-blue-500/15 text-white' : 'border-slate-700 text-slate-300 hover:border-blue-500/60'
+                }`}>
                 {ready ? <Icon className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />} {label}
-              </div>
+              </button>
             ))}
           </div>
 
-          {!selectedNode ? (
+          {agent === 'sec' ? securityPanel : !selectedNode ? (
             <p className="text-sm text-slate-500">File එකක් select කළාම ඒකේ AI audit සහ details මෙතන පෙනෙනවා.</p>
           ) : (
             <>

@@ -108,3 +108,12 @@ body { margin: 0; background: #050816; }
 
 /* Dark thin scrollbars */
 * { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+
+/* ---------- Security severity on graph nodes ---------- */
+.react-flow__node .file-node.sev-safe { border-color: rgba(16,185,129,.4); }
+.react-flow__node .file-node.sev-low,
+.react-flow__node .file-node.sev-medium { border-color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,.25); }
+.react-flow__node .file-node.sev-high { border-color: #ef4444; box-shadow: 0 0 16px rgba(239,68,68,.35); }
+.sev-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; }
+.sev-badge-high { background: #dc2626; }
+.sev-badge-medium, .sev-badge-low { background: #d97706; }
