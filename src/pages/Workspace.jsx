@@ -182,6 +182,11 @@ export default function Workspace() {
   const [flow, setFlow] = useState(null);
   const [activeEp, setActiveEp] = useState(null);
 
+  // Dependency CVE scan (OSV)
+  const [deps, setDeps] = useState({ status: 'idle' });
+  const [depsDirectOnly, setDepsDirectOnly] = useState(true);
+  const depsToken = useRef(0);
+
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
   const analysis = analyses[selectedId] || {};
   const aiAnalysis = analysis[lang] || '';
@@ -242,6 +247,25 @@ export default function Workspace() {
     if (window.innerWidth < 1024) setMobileTab('code');
   };
 
+  // Graph එක පෙන්නපු පස්සේ පසුබිමෙන් dependency scan එක (OSV) run වෙනවා
+  const startDepsScan = async (manifests) => {
+    const token = ++depsToken.current;
+    const map = new Map();
+    (manifests || []).forEach((m) => m.packages.forEach((p) => {
+      const k = `${p.name}@${p.version}`;
+      if (!map.has(k)) map.set(k, p);
+    }));
+    const packages = [...map.values()];
+    if (!packages.length) { setDeps({ status: 'none' }); return; }
+    setDeps({ status: 'loading' });
+    try {
+      const res = await api.post('/deps/scan', { packages });
+      if (token === depsToken.current) setDeps({ status: 'done', data: res.data.data });
+    } catch (err) {
+      if (token === depsToken.current) setDeps({ status: 'error', error: err.response?.data?.error || 'Dependency scan එක අසාර්ථක වුණා.' });
+    }
+  };
+
   const applyGraph = (data, meta, name) => {
     const l = getLayoutedElements(data.nodes, data.edges);
     setNodes(l.nodes);
@@ -252,6 +276,7 @@ export default function Workspace() {
     setScan(meta?.scan || null);
     setFlow(meta?.flow || null);
     setActiveEp(null);
+    startDepsScan(meta?.manifests);
     setAgent(meta?.scan ? 'sec' : 'arch');
     setProjectName(name);
     setLoadOpen(false);
@@ -430,6 +455,61 @@ export default function Workspace() {
     </div>
   );
 
+  const depsList = deps.status === 'done' ? deps.data.packages.filter((p) => !depsDirectOnly || p.direct) : [];
+  const depsCard = (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Dependencies (OSV)</p>
+        {deps.status === 'loading' && <span className="text-[11px] text-indigo-300 animate-pulse">Scanning…</span>}
+      </div>
+      {deps.status === 'none' && <p className="text-xs text-slate-500">package.json හොයාගන්න බැරි වුණා.</p>}
+      {deps.status === 'error' && <p className="text-xs text-red-300">{deps.error}</p>}
+      {deps.status === 'done' && (
+        <>
+          <p className="text-xs text-slate-400">
+            {deps.data.stats.vulnerablePackages} vulnerable of {deps.data.stats.scanned} packages
+            {' · '}{deps.data.stats.directVulnerable} direct
+          </p>
+          <div className="flex gap-1.5 text-[11px]">
+            {['high', 'medium', 'low'].map((k) => (
+              <span key={k} className={`px-1.5 py-0.5 rounded border capitalize ${SEV_STYLE[k]}`}>{k} {deps.data.stats.counts[k]}</span>
+            ))}
+          </div>
+          {deps.data.stats.approx > 0 && (
+            <p className="text-[11px] text-amber-300">Lockfile නැති නිසා versions {deps.data.stats.approx}ක් package.json range එකෙන් ඇස්තමේන්තු කළ ඒවා.</p>
+          )}
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950/60 border border-slate-800 text-xs">
+            {[[true, 'Direct'], [false, 'All (incl. transitive)']].map(([v, label]) => (
+              <button key={label} onClick={() => setDepsDirectOnly(v)}
+                className={`py-1.5 rounded-md ${depsDirectOnly === v ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {depsList.length === 0 && <p className="text-xs text-slate-400">මේ ගණයේ දන්නා vulnerabilities නැහැ.</p>}
+          {depsList.map((p) => (
+            <details key={`${p.name}@${p.version}`} className="rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-2">
+              <summary className="cursor-pointer flex items-center gap-2 text-xs">
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase ${SEV_STYLE[p.severity]}`}>{p.severity}</span>
+                <span className="font-mono break-all flex-1">{p.name}@{p.version}</span>
+                <span className="text-[10px] text-slate-400">{p.direct ? 'direct' : 'transitive'}</span>
+              </summary>
+              <div className="mt-2 space-y-2">
+                {p.vulns.map((v) => (
+                  <div key={v.id} className="text-xs space-y-0.5">
+                    <a href={`https://osv.dev/vulnerability/${v.id}`} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline break-all">{v.id}</a>
+                    {v.summary && <p className="text-slate-300">{v.summary}</p>}
+                    {v.fixed.length > 0 && <p className="text-emerald-300/90">Fixed in: {v.fixed.join(', ')}</p>}
+                  </div>
+                ))}
+              </div>
+            </details>
+          ))}
+        </>
+      )}
+    </div>
+  );
+
   const securityPanel = !scan ? (
     <p className="text-sm text-slate-500">Project එකක් load කළාම security scan එක ඉබේම run වෙනවා.</p>
   ) : (
@@ -449,6 +529,8 @@ export default function Workspace() {
       <p className="text-[11px] text-slate-500">
         Score = 100 − (High×10 + Medium×4 + Low×1). Rule-based scan (AST), AI නැතුව, නොමිලේ.
       </p>
+
+      {depsCard}
 
       {selectedNode && (
         <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950/60 border border-slate-800 text-xs">
