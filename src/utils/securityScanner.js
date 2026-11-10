@@ -20,6 +20,8 @@ const RULES = {
   'tls-disabled': { id: 'SEC-012', title: 'TLS certificate verification disabled', cwe: 'CWE-295', fix: 'Remove rejectUnauthorized: false and fix the certificate instead.' },
   'sensitive-log': { id: 'SEC-013', title: 'Sensitive value may be logged', cwe: 'CWE-532', fix: 'Do not log passwords, tokens or keys. Log a non-sensitive identifier instead.' },
   'no-helmet': { id: 'SEC-014', title: 'No security headers (helmet)', cwe: 'CWE-693', fix: 'Add the helmet middleware: app.use(helmet()).' },
+  'missing-auth': { id: 'SEC-016', title: 'Endpoint without authentication', cwe: 'CWE-306', fix: 'Put your authentication middleware (e.g. protect / verifyToken) in front of the handler, or mark the route as intentionally public.' },
+  'missing-role-check': { id: 'SEC-017', title: 'Admin route without role check', cwe: 'CWE-285', fix: 'Add an authorization middleware (e.g. requireRole("admin")) after authentication.' },
   'no-rate-limit': { id: 'SEC-015', title: 'No rate limiting', cwe: 'CWE-770', fix: 'Add express-rate-limit, at least on login and other sensitive routes.' },
 };
 
@@ -70,7 +72,7 @@ const calleeProp = (node) => {
   return c && (c.type === 'MemberExpression' || c.type === 'OptionalMemberExpression') && !c.computed && c.property ? c.property.name : '';
 };
 
-const makeFinding = (rule, severity, line, message, snippet) => ({
+export const makeFinding = (rule, severity, line, message, snippet) => ({
   id: RULES[rule].id, rule, severity, line, title: RULES[rule].title,
   message, cwe: RULES[rule].cwe, fix: RULES[rule].fix, snippet,
 });
