@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { parseFileToAST } from '../utils/astParser.js';
 import { scanSource, scanRepoLevel, summarize, topSeverity, makeFinding } from '../utils/securityScanner.js';
 import { mapEndpoints } from '../utils/endpointMapper.js';
+import { collectManifests } from '../utils/depsCollector.js';
 
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // GitHub ZIP එකේ උපරිම size (50MB)
 const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024; // extract කළාම උපරිම size
@@ -163,7 +164,7 @@ const buildGraphFromZip = async (zipPath) => {
           controller: { text: e.controller.text, fn: e.controller.fn },
           models: e.models.map((m) => m.name),
           routeNodeId: idOf(e.file),
-          nodeIds: [...new Set([e.file, ...e.middleware.map((m) => m.file), e.controller.file, ...e.models.map((m) => m.file)]
+          nodeIds: [...new Set([...(e.mountFiles || []), e.file, ...e.middleware.map((m) => m.file), e.controller.file, ...e.models.map((m) => m.file)]
             .filter(Boolean).map(idOf).filter(Boolean))],
         })),
       };
@@ -190,7 +191,10 @@ const buildGraphFromZip = async (zipPath) => {
       }
     });
 
-    return { nodes, edges, truncated, scan, flow };
+    let manifests = [];
+    try { manifests = collectManifests(extractDir); } catch (err) { console.warn('Manifest scan skipped:', err.message); }
+
+    return { nodes, edges, truncated, scan, flow, manifests };
   } finally {
     await fs.remove(extractDir);
   }
@@ -203,8 +207,8 @@ export const parseZipFile = async (req, res) => {
   }
 
   try {
-    const { nodes, edges, truncated, scan, flow } = await buildGraphFromZip(req.file.path);
-    res.status(200).json({ success: true, data: { nodes, edges }, meta: { truncated, scan, flow } });
+    const { nodes, edges, truncated, scan, flow, manifests } = await buildGraphFromZip(req.file.path);
+    res.status(200).json({ success: true, data: { nodes, edges }, meta: { truncated, scan, flow, manifests } });
   } catch (error) {
     sendError(res, error, 'ZIP file එක parse කිරීමේදී දෝෂයක් සිදු විය.');
   } finally {
@@ -293,7 +297,7 @@ export const parseGithubRepo = async (req, res) => {
 
   try {
     await downloadRepoZip(target, zipPath);
-    const { nodes, edges, truncated, scan, flow } = await buildGraphFromZip(zipPath);
+    const { nodes, edges, truncated, scan, flow, manifests } = await buildGraphFromZip(zipPath);
 
     if (nodes.length === 0) {
       throw new HttpError(422, 'මේ repo එකේ JS/TS files (.js, .jsx, .ts, .tsx) හොයාගන්න බැරි වුණා.');
@@ -302,7 +306,7 @@ export const parseGithubRepo = async (req, res) => {
     res.status(200).json({
       success: true,
       data: { nodes, edges },
-      meta: { source: 'github', repo: `${target.owner}/${target.repo}`, truncated, scan, flow },
+      meta: { source: 'github', repo: `${target.owner}/${target.repo}`, truncated, scan, flow, manifests },
     });
   } catch (error) {
     sendError(res, error, 'GitHub repo එක analyze කිරීමේදී දෝෂයක් සිදු විය.');

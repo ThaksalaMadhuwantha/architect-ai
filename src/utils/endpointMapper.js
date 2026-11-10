@@ -250,7 +250,7 @@ export const mapEndpoints = (entries) => {
   const endpoints = [];
   const issues = [];
 
-  const emit = (file, r, fullPath, mwItems) => {
+  const emit = (file, r, fullPath, mwItems, chain) => {
     const middleware = mwItems.map(({ h, from }) => {
       const f = fileOfHandler(from, h);
       return { text: h.text, kind: classify(h.text, f), file: f };
@@ -272,7 +272,7 @@ export const mapEndpoints = (entries) => {
     const isProtected = middleware.some((m) => m.kind === 'auth' || m.kind === 'role');
     const isPublic = PUBLIC_RE.test(fullPath) && !isProtected;
     const method = r.method.toUpperCase();
-    endpoints.push({ method, path: fullPath, file: file.path, line: r.line, middleware, controller: ctrl, models, protected: isProtected, public: isPublic });
+    endpoints.push({ method, path: fullPath, file: file.path, line: r.line, middleware, controller: ctrl, models, protected: isProtected, public: isPublic, mountFiles: chain });
 
     const snippet = ((codeOf.get(file.path) || '').split('\n')[r.line - 1] || '').trim().slice(0, 140);
     if (!isProtected && !isPublic && r.method !== 'options' && r.method !== 'head') {
@@ -290,7 +290,7 @@ export const mapEndpoints = (entries) => {
     }
   };
 
-  const walk = (file, prefix, inherited, depth) => {
+  const walk = (file, prefix, inherited, depth, chain = []) => {
     if (depth > 6) return;
     const mounts = [];
     const mws = [];
@@ -312,7 +312,7 @@ export const mapEndpoints = (entries) => {
       const items = [...inherited, ...mws.filter((m) => m.line < r.line)].filter(inScope(fullPath))
         .map((m) => ({ h: m.h, from: m.from }))
         .concat(r.handlers.slice(0, -1).map((h) => ({ h, from: file.path })));
-      emit(file, r, fullPath, items);
+      emit(file, r, fullPath, items, chain);
     });
 
     mounts.forEach((m) => {
@@ -321,7 +321,8 @@ export const mapEndpoints = (entries) => {
         m.file,
         scope,
         [...inherited, ...mws.filter((x) => x.line < m.u.line), ...m.others.map((h) => ({ h, from: file.path, line: m.u.line, scope }))],
-        depth + 1
+        depth + 1,
+        [...chain, file.path]
       );
     });
   };

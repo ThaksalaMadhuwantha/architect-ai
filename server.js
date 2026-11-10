@@ -6,6 +6,7 @@ import { connectDB } from './src/config/db.js';
 import parserRoutes from './src/routes/parserRoutes.js';
 import aiRoutes from './src/routes/aiRoutes.js';
 import authRoutes from './src/routes/authRoutes.js';
+import depsRoutes from './src/routes/depsRoutes.js';
 import { apiLimiter } from './src/middleware/rateLimiters.js';
 import dns from 'node:dns';
 
@@ -38,6 +39,7 @@ app.use('/api', apiLimiter);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/parser', parserRoutes);
 app.use('/api/v1/ai', aiRoutes);
+app.use('/api/v1/deps', depsRoutes);
 
 app.get('/', (req, res) => {
   res.send('ArchitectAI Express Engine Running...');
