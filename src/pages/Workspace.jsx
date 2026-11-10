@@ -7,7 +7,7 @@ import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import {
   UploadCloud, FileCode, Folder, ChevronRight, ChevronDown, Search, Sparkles, LogOut,
-  Lock, Send, ShieldCheck, Network, Wrench, ArrowRightLeft, Code2, X, Maximize2,
+  Lock, Send, ShieldCheck, Network, Wrench, ArrowRightLeft, Code2, X, Maximize2, GitBranch,
 } from 'lucide-react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -125,10 +125,20 @@ function TreeFolder({ name, node, depth, selectedId, onSelect }) {
 const LANGS = [['en', 'English'], ['si', 'සිංහල'], ['ta', 'தமிழ்'], ['hi', 'हिन्दी']];
 
 const AGENTS = [
-  { id: 'arch', label: 'Architecture', icon: Network, ready: true },
+  { id: 'arch', label: 'Arch', icon: Network, ready: true },
   { id: 'sec', label: 'Security', icon: ShieldCheck, ready: true },
+  { id: 'flow', label: 'Flow', icon: GitBranch, ready: true },
   { id: 'ref', label: 'Refactor', icon: Wrench, ready: false },
 ];
+
+const METHOD_STYLE = {
+  GET: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30',
+  POST: 'text-sky-300 bg-sky-500/10 border-sky-500/30',
+  PUT: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+  PATCH: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+  DELETE: 'text-red-300 bg-red-500/10 border-red-500/30',
+};
+const KIND_STYLE = { auth: 'text-emerald-300', role: 'text-emerald-300', limiter: 'text-sky-300', validation: 'text-sky-300', upload: 'text-amber-300' };
 
 const MOBILE_TABS = [['files', 'Files', Folder], ['graph', 'Graph', Network], ['code', 'Code', Code2], ['ai', 'AI', Sparkles]];
 
@@ -167,6 +177,10 @@ export default function Workspace() {
   const [onlyFile, setOnlyFile] = useState(false);
   const [focusLine, setFocusLine] = useState(null);
   const focusRef = useRef(null);
+
+  // Endpoint flow map
+  const [flow, setFlow] = useState(null);
+  const [activeEp, setActiveEp] = useState(null);
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
   const analysis = analyses[selectedId] || {};
@@ -236,6 +250,8 @@ export default function Workspace() {
     setAnalyses({});
     setTruncated(!!meta?.truncated);
     setScan(meta?.scan || null);
+    setFlow(meta?.flow || null);
+    setActiveEp(null);
     setAgent(meta?.scan ? 'sec' : 'arch');
     setProjectName(name);
     setLoadOpen(false);
@@ -340,12 +356,79 @@ export default function Workspace() {
   });
 
   // එකම rule එකේ findings එකට කණ්ඩායම් කරනවා (rule එකේ විස්තරය එක පාරයි, ස්ථාන වෙන වෙනම)
+  // Endpoint එකක් select කළාම ඒකේ path එක graph එකේ highlight වෙනවා
+  const epSet = useMemo(() => (activeEp ? new Set(activeEp.nodeIds) : null), [activeEp]);
+  const displayNodes = useMemo(
+    () => (epSet ? nodes.map((n) => ({ ...n, className: epSet.has(n.id) ? 'ep-on' : 'ep-dim' })) : nodes),
+    [nodes, epSet]
+  );
+  const displayEdges = useMemo(
+    () =>
+      epSet
+        ? edges.map((e) =>
+            epSet.has(e.source) && epSet.has(e.target)
+              ? { ...e, animated: true, style: { stroke: '#818cf8', strokeWidth: 3 } }
+              : { ...e, style: { ...e.style, opacity: 0.1 } })
+        : edges,
+    [edges, epSet]
+  );
+
   const groups = Object.values(
     shownFindings.reduce((m, f) => {
       (m[f.rule] ||= { rule: f.rule, title: f.title, cwe: f.cwe, fix: f.fix, severity: f.severity, items: [] }).items.push(f);
       return m;
     }, {})
   ).sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity] || b.items.length - a.items.length);
+
+  const openEndpoint = (ep) => {
+    setActiveEp(ep);
+    if (ep.routeNodeId) {
+      selectFile(ep.routeNodeId);
+      setFocusLine(ep.line);
+    }
+  };
+
+  const flowPanel = !flow || flow.endpoints.length === 0 ? (
+    <p className="text-sm text-slate-500">
+      {flow ? 'Express endpoints හොයාගන්න බැරි වුණා (router.get / router.post ... නැති project එකක්).' : 'Project එකක් load කළාම endpoint map එක ඉබේම හැදෙනවා.'}
+    </p>
+  ) : (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {[['Endpoints', flow.stats.total, 'text-white'], ['Protected', flow.stats.protected, 'text-emerald-300'], ['Open', flow.stats.open, flow.stats.open ? 'text-red-300' : 'text-slate-300']].map(([k, v, c]) => (
+          <div key={k} className="rounded-lg border border-slate-800 bg-slate-950/50 py-2">
+            <p className={`text-lg font-bold ${c}`}>{v}</p>
+            <p className="text-[11px] text-slate-400">{k}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-slate-500">
+        Endpoint එකක් click කළාම graph එකේ ඒකේ path එක (route → middleware → controller → model) highlight වෙනවා. Login/register වගේ public by design: {flow.stats.public}.
+      </p>
+      {activeEp && (
+        <button onClick={() => setActiveEp(null)} className="text-xs text-indigo-300 hover:underline">Clear highlight</button>
+      )}
+      {flow.endpoints.map((ep) => (
+        <button key={ep.id} onClick={() => openEndpoint(ep)}
+          className={`w-full text-left rounded-lg border p-2.5 space-y-1 ${activeEp?.id === ep.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 bg-slate-950/50 hover:border-slate-600'}`}>
+          <div className="flex items-center gap-2">
+            <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${METHOD_STYLE[ep.method] || METHOD_STYLE.GET}`}>{ep.method}</span>
+            <span className="text-xs font-mono break-all flex-1">{ep.path}</span>
+            {ep.protected ? <Lock className="w-3.5 h-3.5 text-emerald-300 shrink-0" /> : !ep.public && <span className="text-[10px] font-semibold text-red-300 shrink-0">OPEN</span>}
+          </div>
+          {activeEp?.id === ep.id && (
+            <div className="text-[11px] space-y-0.5 pt-1">
+              {ep.middleware.filter((m) => m.kind !== 'other').map((m, i) => (
+                <p key={i} className={KIND_STYLE[m.kind] || 'text-slate-400'}>↳ {m.kind}: {m.text}</p>
+              ))}
+              <p className="text-indigo-300">↳ controller: {ep.controller.fn || ep.controller.text}</p>
+              {ep.models.length > 0 && <p className="text-amber-300">↳ model: {ep.models.join(', ')}</p>}
+            </div>
+          )}
+        </button>
+      ))}
+    </div>
+  );
 
   const securityPanel = !scan ? (
     <p className="text-sm text-slate-500">Project එකක් load කළාම security scan එක ඉබේම run වෙනවා.</p>
@@ -602,7 +685,7 @@ export default function Workspace() {
                 <button onClick={() => setLoadOpen(true)} className="h-10 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white">Load Project</button>
               </div>
             )}
-            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+            <ReactFlow nodes={displayNodes} edges={displayEdges} nodeTypes={nodeTypes}
               onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
               onNodeClick={(_, n) => selectFile(n.id)}
               fitView fitViewOptions={{ padding: 0.15 }} minZoom={0.1} proOptions={{ hideAttribution: true }}>
@@ -650,7 +733,7 @@ export default function Workspace() {
           <div className="flex gap-2">
             {AGENTS.map(({ id, label, icon: Icon, ready }) => (
               <button key={id} disabled={!ready} onClick={() => setAgent(id)} title={ready ? label : 'Coming soon'}
-                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                className={`flex-1 min-w-0 rounded-lg border px-1.5 py-1.5 text-[11px] flex items-center justify-center gap-1 transition-colors ${
                   !ready ? 'border-slate-800 text-slate-500' : agent === id ? 'border-blue-500/60 bg-blue-500/15 text-white' : 'border-slate-700 text-slate-300 hover:border-blue-500/60'
                 }`}>
                 {ready ? <Icon className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />} {label}
@@ -658,7 +741,7 @@ export default function Workspace() {
             ))}
           </div>
 
-          {agent === 'sec' ? securityPanel : !selectedNode ? (
+          {agent === 'sec' ? securityPanel : agent === 'flow' ? flowPanel : !selectedNode ? (
             <p className="text-sm text-slate-500">File එකක් select කළාම ඒකේ AI audit සහ details මෙතන පෙනෙනවා.</p>
           ) : (
             <>

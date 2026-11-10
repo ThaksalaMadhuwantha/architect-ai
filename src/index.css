@@ -117,3 +117,7 @@ body { margin: 0; background: #050816; }
 .sev-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; }
 .sev-badge-high { background: #dc2626; }
 .sev-badge-medium, .sev-badge-low { background: #d97706; }
+
+/* ---------- Endpoint flow highlight ---------- */
+.react-flow__node.ep-dim { opacity: .2; transition: opacity .2s; }
+.react-flow__node.ep-on .file-node { border-color: #818cf8; box-shadow: 0 0 20px rgba(129,140,248,.6); }
