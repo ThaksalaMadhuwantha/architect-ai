@@ -37,6 +37,18 @@ export default function Markdown({ text, large = false }) {
       continue;
     }
 
+    // ```code fence```
+    if (line.trim().startsWith('```')) {
+      const body = [];
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim().startsWith('```')) { body.push(lines[j]); j++; }
+      out.push(
+        <pre key={i} className="overflow-x-auto rounded-md border border-slate-700 bg-slate-950 p-2 text-[11px] text-emerald-200 whitespace-pre">{body.join('\n')}</pre>
+      );
+      i = j;
+      continue;
+    }
+
     // --- (horizontal rule)
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
       out.push(<hr key={i} className="my-2 border-slate-700/60" />);

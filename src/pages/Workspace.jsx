@@ -187,6 +187,12 @@ export default function Workspace() {
   const [depsDirectOnly, setDepsDirectOnly] = useState(true);
   const depsToken = useRef(0);
 
+  // AI Mentor (finding එකක් ඇයි වැරදි කියලා පැහැදිලි කිරීම)
+  const [mentorLang, setMentorLang] = useState('en');
+  const [mentor, setMentor] = useState({});
+  const [mentorBusy, setMentorBusy] = useState('');
+  const [mentorError, setMentorError] = useState('');
+
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
   const analysis = analyses[selectedId] || {};
   const aiAnalysis = analysis[lang] || '';
@@ -405,6 +411,34 @@ export default function Workspace() {
     }, {})
   ).sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity] || b.items.length - a.items.length);
 
+  const mkey = (f) => `${f.nodeId}-${f.rule}-${f.line}|${mentorLang}`;
+  const askMentor = async (f) => {
+    const key = mkey(f);
+    if (mentor[key] || mentorBusy) return;
+    setMentorError('');
+    setMentorBusy(key);
+    // Secrets AI එකට යවන්නේ නැහැ: ඒවාට masked snippet එක පමණයි යවන්නේ
+    const secretRule = ['hardcoded-secret', 'jwt-hardcoded', 'secret-fallback'].includes(f.rule);
+    const node = nodes.find((n) => n.id === f.nodeId);
+    const all = (node?.data.code || '').split('\n');
+    const from = Math.max(0, f.line - 8);
+    const context = secretRule
+      ? f.snippet
+      : all.slice(from, Math.min(all.length, f.line + 7)).map((l, i) => `${from + i + 1}: ${l}`).join('\n');
+    try {
+      const res = await api.post('/ai/mentor', {
+        title: f.title, message: f.message, fix: f.fix, example: f.example, cwe: f.cwe,
+        fileName: f.file, line: f.line, context, language: mentorLang,
+      });
+      if (res.data.success) setMentor((m) => ({ ...m, [key]: res.data.mentor }));
+    } catch (err) {
+      if (err.response?.status === 401) return handleLogout();
+      setMentorError(err.response?.data?.error || 'Mentor පැහැදිලි කිරීම ලබාගන්න බැරි වුණා.');
+    } finally {
+      setMentorBusy('');
+    }
+  };
+
   const openEndpoint = (ep) => {
     setActiveEp(ep);
     if (ep.routeNodeId) {
@@ -456,6 +490,8 @@ export default function Workspace() {
   );
 
   const depsList = deps.status === 'done' ? deps.data.packages.filter((p) => !depsDirectOnly || p.direct) : [];
+  const depsCounts = { high: 0, medium: 0, low: 0 };
+  depsList.forEach((p) => p.vulns.forEach((v) => { depsCounts[v.severity] += 1; }));
   const depsCard = (
     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2.5">
       <div className="flex items-center justify-between">
@@ -467,12 +503,11 @@ export default function Workspace() {
       {deps.status === 'done' && (
         <>
           <p className="text-xs text-slate-400">
-            {deps.data.stats.vulnerablePackages} vulnerable of {deps.data.stats.scanned} packages
-            {' · '}{deps.data.stats.directVulnerable} direct
+            {deps.data.stats.vulnerablePackages} vulnerable packages of {deps.data.stats.scanned} scanned · {deps.data.stats.directVulnerable} direct
           </p>
           <div className="flex gap-1.5 text-[11px]">
             {['high', 'medium', 'low'].map((k) => (
-              <span key={k} className={`px-1.5 py-0.5 rounded border capitalize ${SEV_STYLE[k]}`}>{k} {deps.data.stats.counts[k]}</span>
+              <span key={k} className={`px-1.5 py-0.5 rounded border capitalize ${SEV_STYLE[k]}`}>{k} {depsCounts[k]}</span>
             ))}
           </div>
           {deps.data.stats.approx > 0 && (
@@ -543,6 +578,21 @@ export default function Workspace() {
         </div>
       )}
 
+      <div className="space-y-1.5">
+        <p className="text-[11px] text-slate-400">🎓 Mentor භාෂාව (finding එකක් විවෘත කරලා &quot;Explain&quot; ඔබන්න):</p>
+        <div className="flex flex-wrap gap-1.5">
+          {LANGS.map(([code, label]) => (
+            <button key={code} onClick={() => setMentorLang(code)}
+              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+                mentorLang === code ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-500'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {mentorError && <p role="alert" className="text-xs text-red-300">{mentorError}</p>}
+      </div>
+
       {groups.length === 0 ? (
         <p className="text-sm text-slate-400 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
           No issues found by the current rules. මෙය ආරක්ෂාවේ සහතිකයක් නෙවෙයි, rules ගණන සීමිතයි.
@@ -576,6 +626,19 @@ export default function Workspace() {
                     {f.example && (
                       <pre className="mt-2 text-[11px] text-emerald-200 bg-slate-950 border border-slate-800 rounded p-2 whitespace-pre-wrap break-all">{f.example}</pre>
                     )}
+                    <div className="mt-2">
+                      {mentor[mkey(f)] ? (
+                        <div className="rounded-md border border-indigo-800/50 bg-indigo-950/40 p-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-300 mb-1.5">🎓 Mentor</p>
+                          <Markdown text={mentor[mkey(f)]} />
+                        </div>
+                      ) : (
+                        <button onClick={() => askMentor(f)} disabled={!!mentorBusy}
+                          className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-500/50 text-indigo-200 hover:bg-indigo-500/10 disabled:opacity-50">
+                          {mentorBusy === mkey(f) ? 'Thinking…' : '🎓 Explain with Mentor'}
+                        </button>
+                      )}
+                    </div>
                   </details>
                 </div>
               ))}
