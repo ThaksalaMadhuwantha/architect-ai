@@ -1,4 +1,4 @@
-import { askLLM, LLMError } from '../utils/llm.js';
+import { askAI, LLMError } from '../utils/llm.js';
 
 const sendError = (res, error, fallback) => {
   console.error('AI Error:', error);
@@ -39,7 +39,7 @@ Do NOT use tables, horizontal rules, or code blocks.
 `;
 
   try {
-    const { text, model } = await askLLM([{ role: 'user', content: prompt }], { maxTokens: 1200 });
+    const { text, model } = await askAI([{ role: 'user', content: prompt }], { maxTokens: 1200 });
     res.status(200).json({ success: true, analysis: text, model });
   } catch (error) {
     sendError(res, error, 'AI Analysis ලබාගැනීමේදී දෝෂයක් සිදු විය.');
@@ -99,7 +99,7 @@ ${String(text).slice(0, 8000)}
 `;
 
   try {
-    const { text: translation, model } = await askLLM([{ role: 'user', content: prompt }], {
+    const { text: translation, model } = await askAI([{ role: 'user', content: prompt }], {
       maxTokens: 3500,
       temperature: 0.2,
       prefer: /gemma/i, // Google Gemma models බහුභාෂා වලට සාමාන්‍යයෙන් වඩා හොඳයි
@@ -109,5 +109,58 @@ ${String(text).slice(0, 8000)}
     res.status(200).json({ success: true, translation, model });
   } catch (error) {
     sendError(res, error, 'Translation එක ලබාගැනීමේදී දෝෂයක් සිදු විය.');
+  }
+};
+
+/* ---------- 3. AI Mentor: finding එකක් "ඇයි වැරදි / senior කෙනෙක් කොහොමද ලියන්නේ" ---------- */
+const clip = (v, n) => String(v || '').slice(0, n);
+
+export const mentorFinding = async (req, res) => {
+  const { title, message, fix, example, cwe, fileName, line, context, language } = req.body || {};
+
+  if (!title || !message) {
+    return res.status(400).json({ success: false, error: 'Finding එකේ විස්තර අවශ්‍යයි.' });
+  }
+  const lang = LANGUAGES[language]; // 'en' නම් undefined
+
+  const langRules = lang
+    ? `Write the whole answer in ${lang.name}. ${lang.style}
+Keep ALL technical words in English letters (server, middleware, route, API, request, query, token, JWT, function, variable, file names, anything in backticks). Never translate or transliterate them. Do not invent words; if unsure, keep the English word.
+Example of the target style:
+${lang.example}`
+    : 'Write in clear, simple English.';
+
+  // Scanner එක දැනටමත් issue එක තහවුරු කළා. AI එකට අලුතින් issues හදන්න දෙන්නේ නැහැ (hallucination අඩු කරන්න).
+  const prompt = `
+You are a friendly senior engineer mentoring a junior developer.
+A static analysis tool (not you) has already CONFIRMED the issue below. Do not invent other problems and do not doubt the finding. If the code shown is not enough to be sure, say what the developer should check.
+
+Issue: ${clip(title, 120)} (${clip(cwe, 20)})
+Location: ${clip(fileName, 160)}:${Number(line) || 0}
+What the tool found: ${clip(message, 600)}
+Code around the issue:
+${clip(context, 1500)}
+Tool's suggested change: ${clip(example || fix, 400)}
+
+Answer in Markdown with exactly these 3 short sections (use "## " headings, translated into the answer language):
+## Why this is a problem
+2-4 sentences with a concrete attack or failure scenario that uses this code.
+## How a senior developer would write it
+The corrected code in a fenced code block, then 1-2 sentences why it is better.
+## Remember
+One sentence rule of thumb.
+
+Keep it under 200 words. ${langRules}
+`;
+
+  try {
+    const { text, model } = await askAI([{ role: 'user', content: prompt }], {
+      maxTokens: 2500,
+      temperature: 0.3,
+      ...(lang ? { prefer: /gemma/i, exclude: /code/i, retry429: 1 } : {}),
+    });
+    res.status(200).json({ success: true, mentor: text, model });
+  } catch (error) {
+    sendError(res, error, 'Mentor පැහැදිලි කිරීම ලබාගැනීමේදී දෝෂයක් සිදු විය.');
   }
 };

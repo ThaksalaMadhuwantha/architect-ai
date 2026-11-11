@@ -128,7 +128,7 @@ const callModel = async (apiKey, model, messages, { maxTokens, temperature, extr
 
 export const askLLM = async (
   messages,
-  { maxTokens = 1500, temperature = 0.2, prefer, exclude, retry429 = 0, extra } = {}
+  { maxTokens = 1500, temperature = 0.2, prefer, exclude, retry429 = 0, first = [], extra } = {}
 ) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new LLMError(500, 'OPENROUTER_API_KEY එක .env file එකේ නැහැ.');
@@ -141,6 +141,8 @@ export const askLLM = async (
     if (kept.length) models = kept;
   }
   if (prefer) models = [...models.filter((m) => prefer.test(m)), ...models.filter((m) => !prefer.test(m))];
+  // first: ඕනෑම model එකක් (paid ඒවාත් ඇතුළුව) මුලින්ම try කරන්න. Free list එකෙන් පෙරන්නේ නෑ.
+  models = [...new Set([...first, ...models])];
   if (models.length === 0) {
     throw new LLMError(503, 'දැනට භාවිතා කළ හැකි free AI model එකක් හොයාගන්න බැරි වුණා.');
   }
@@ -167,7 +169,10 @@ export const askLLM = async (
 
     // මේවා model එකෙන් model එකට වෙනස් වෙන්නේ නෑ, ඉතින් ඊළඟ එක try කරලා වැඩක් නෑ
     if (r.status === 401) throw new LLMError(500, 'OpenRouter API key එක වලංගු නැහැ. .env එක පරීක්ෂා කරන්න.');
-    if (r.status === 402) throw new LLMError(402, 'OpenRouter account එකේ balance එක negative. Free models වලටත් ඒක positive විය යුතුයි.');
+    // Free model එකකට 402 ආවොත් account balance එක negative. Paid model එකකට 402 ආවොත් credits නැහැ, ඊළඟ (free) එකට යනවා
+    if (r.status === 402 && !first.includes(model)) {
+      throw new LLMError(402, 'OpenRouter account එකේ balance එක negative. Free models වලටත් ඒක positive විය යුතුයි.');
+    }
     if (r.status === 429 && /per[- ]?day|daily/i.test(String(r.message))) {
       throw new LLMError(429, 'අද දවසේ free AI requests සීමාව ඉවරයි. UTC අනුව reset වෙනවා (ශ්‍රී ලංකා වෙලාවෙන් උදේ 5.30 විතර).');
     }
@@ -175,9 +180,88 @@ export const askLLM = async (
     failures.push(`${model.split('/').pop()}: ${r.status}`);
   }
 
+  if (failures.every((f) => f.endsWith(': 402'))) {
+    throw new LLMError(402, 'OpenRouter account එකේ credits ප්‍රමාණවත් නැහැ.');
+  }
   const allRateLimited = failures.every((f) => f.endsWith(': 429'));
   throw new LLMError(
     allRateLimited ? 429 : 502,
     `Free AI models සියල්ලම දැන් busy හෝ limit වෙලා (${failures.join(', ')}). විනාඩි කීපයකින් නැවත උත්සාහ කරන්න.`
   );
+};
+
+/* ---------- Google Gemini (Google AI Studio free key) ----------
+   .env:
+     GEMINI_API_KEY=...                                (aistudio.google.com → Get API key)
+     GEMINI_MODELS=gemini-2.5-flash,gemini-2.5-flash-lite   (optional)
+   OpenRouter free pool එකෙන් වෙනස්ව මේක ඔයාගේම key එකේ quota එක පාවිච්චි කරනවා. */
+const geminiUrl = (model) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+export const askGemini = async (messages, { maxTokens = 1500, temperature = 0.2 } = {}) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new LLMError(500, 'GEMINI_API_KEY එක .env file එකේ නැහැ.');
+
+  const models = (process.env.GEMINI_MODELS || 'gemini-2.5-flash,gemini-2.5-flash-lite')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const prompt = messages.map((m) => m.content).join('\n\n');
+  const failures = [];
+
+  for (const model of models) {
+    let response;
+    try {
+      response = await fetch(geminiUrl(model), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          // 2.5 models "thinking" tokens ද මේ සීමාවෙන් වැය කරන නිසා ඉඩ වැඩියෙන් තියෙනවා
+          generationConfig: { temperature, maxOutputTokens: Math.max(maxTokens, 4096) },
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch (err) {
+      failures.push(`${model}: ${err.name === 'TimeoutError' ? 'timeout' : 'network'}`);
+      continue;
+    }
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const msg = data?.error?.message || `HTTP ${response.status}`;
+      console.warn(`Gemini failed: ${model} -> ${response.status} ${String(msg).slice(0, 160)}`);
+      failures.push(`${model}: ${response.status}`);
+      continue;
+    }
+
+    const text = clean((data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join(''));
+    if (!text) {
+      console.warn(`Gemini empty: ${model} (finish: ${data?.candidates?.[0]?.finishReason})`);
+      failures.push(`${model}: empty`);
+      continue;
+    }
+    if (isDegenerate(text)) {
+      console.warn(`Gemini repetitive output: ${model}`);
+      failures.push(`${model}: repetitive`);
+      continue;
+    }
+
+    console.log(`AI answered with: gemini/${model}`);
+    return { text, model: `gemini/${model}` };
+  }
+
+  throw new LLMError(502, `Gemini එකෙන් පිළිතුරක් ලැබුණේ නැහැ (${failures.join(', ')}).`);
+};
+
+// GEMINI_API_KEY තිබුණොත් මුලින් Gemini, fail වුණොත් OpenRouter free chain එකට
+export const askAI = async (messages, opts = {}) => {
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return await askGemini(messages, opts);
+    } catch (err) {
+      console.warn('Gemini fail වුණා, OpenRouter එකට මාරු වෙනවා:', err.message);
+    }
+  }
+  return askLLM(messages, opts);
 };
