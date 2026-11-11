@@ -491,6 +491,12 @@ export default function Workspace() {
 
   const depsList = deps.status === 'done' ? deps.data.packages.filter((p) => !depsDirectOnly || p.direct) : [];
   const depsCounts = { high: 0, medium: 0, low: 0 };
+  // කොයි direct package එකෙන්ද වැඩිම vulnerable transitive ගණනක් ආවේ
+  const viaCounts = {};
+  if (deps.status === 'done') {
+    deps.data.packages.filter((p) => !p.direct).forEach((p) => (p.via || []).forEach((v) => { viaCounts[v] = (viaCounts[v] || 0) + 1; }));
+  }
+  const viaTop = Object.entries(viaCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
   depsList.forEach((p) => p.vulns.forEach((v) => { depsCounts[v.severity] += 1; }));
   const depsCard = (
     <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2.5">
@@ -498,6 +504,15 @@ export default function Workspace() {
         <p className="text-sm font-semibold">Dependencies (OSV)</p>
         {deps.status === 'loading' && <span className="text-[11px] text-indigo-300 animate-pulse">Scanning…</span>}
       </div>
+      <details className="text-[11px] text-slate-400">
+        <summary className="cursor-pointer text-indigo-300">මේක මොකක්ද?</summary>
+        <p className="mt-1.5 leading-relaxed">
+          ඔයාගේ project එක වෙනත් අය හදපු packages (npm) පාවිච්චි කරනවා, ඒවා ඇතුළේ තවත් packages ගොඩක් තියෙනවා.
+          සමහර versions වල ප්‍රසිද්ධියේ දන්නා ආරක්ෂක දුර්වලතා තියෙනවා. මේ list එකෙන් පෙන්නන්නේ ඔයාගේ ඇත්තම versions
+          ඒ දුර්වලතා database එකට (OSV) සසඳලා හොයාගත් ඒවා. විසඳුම: &quot;Fixed in&quot; version එකට upgrade කිරීම.
+          මුලින් <b>Direct</b> ඒවා බලන්න, ඒවා update කළාම බොහෝ transitive ඒවා ඉබේම ඉවත් වෙනවා.
+        </p>
+      </details>
       {deps.status === 'none' && <p className="text-xs text-slate-500">package.json හොයාගන්න බැරි වුණා.</p>}
       {deps.status === 'error' && <p className="text-xs text-red-300">{deps.error}</p>}
       {deps.status === 'done' && (
@@ -521,13 +536,19 @@ export default function Workspace() {
               </button>
             ))}
           </div>
+          {viaTop.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-200 space-y-1">
+              <p className="font-semibold">මුලින් update කරන්න (මේවා නිසා transitive vulnerabilities ආවා):</p>
+              {viaTop.map(([name, n]) => <p key={name}><span className="font-mono">{name}</span> → vulnerable packages {n}ක්</p>)}
+            </div>
+          )}
           {depsList.length === 0 && <p className="text-xs text-slate-400">මේ ගණයේ දන්නා vulnerabilities නැහැ.</p>}
           {depsList.map((p) => (
             <details key={`${p.name}@${p.version}`} className="rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-2">
               <summary className="cursor-pointer flex items-center gap-2 text-xs">
                 <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase ${SEV_STYLE[p.severity]}`}>{p.severity}</span>
                 <span className="font-mono break-all flex-1">{p.name}@{p.version}</span>
-                <span className="text-[10px] text-slate-400">{p.direct ? 'direct' : 'transitive'}</span>
+                <span className="text-[10px] text-slate-400 text-right">{p.direct ? 'direct' : `via ${(p.via || []).join(', ') || 'transitive'}`}</span>
               </summary>
               <div className="mt-2 space-y-2">
                 {p.vulns.map((v) => (
