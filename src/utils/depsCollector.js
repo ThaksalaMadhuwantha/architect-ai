@@ -27,16 +27,53 @@ const approxVersion = (range) => {
   return m ? `${m[1]}.${m[2] || 0}.${m[3] || 0}` : null;
 };
 
-const fromLock = (lock) => {
+// package-lock (v2/v3) වල dependency graph එකෙන්: package එකක් කොයි direct package (වල) හරහාද ආවේ
+const buildVia = (pk, directNames) => {
+  const resolveDep = (fromKey, dep) => {
+    let base = fromKey;
+    for (;;) {
+      const cand = `${base ? `${base}/` : ''}node_modules/${dep}`;
+      if (pk[cand]) return cand;
+      if (!base) return null;
+      const i = base.lastIndexOf('/node_modules/');
+      base = i === -1 ? '' : base.slice(0, i);
+    }
+  };
+  const via = new Map(); // key -> Set(direct names)
+  directNames.forEach((d) => {
+    const rootKey = `node_modules/${d}`;
+    if (!pk[rootKey]) return;
+    const seen = new Set([rootKey]);
+    const stack = [rootKey];
+    while (stack.length) {
+      const key = stack.pop();
+      if (!via.has(key)) via.set(key, new Set());
+      via.get(key).add(d);
+      const v = pk[key] || {};
+      Object.keys({ ...(v.dependencies || {}), ...(v.optionalDependencies || {}) }).forEach((dep) => {
+        const next = resolveDep(key, dep);
+        if (next && !seen.has(next)) { seen.add(next); stack.push(next); }
+      });
+    }
+  });
+  return via;
+};
+
+const fromLock = (lock, directNames) => {
   const out = new Map();
-  const add = (name, version, dev) => {
-    if (name && version && /^\d/.test(version)) out.set(`${name}@${version}`, { name, version, dev: !!dev });
+  const add = (name, version, dev, via) => {
+    if (!name || !version || !/^\d/.test(version)) return;
+    const k = `${name}@${version}`;
+    const cur = out.get(k) || { name, version, dev: !!dev, via: new Set() };
+    (via ? [...via] : []).forEach((x) => { if (x !== name) cur.via.add(x); });
+    out.set(k, cur);
   };
   if (lock.packages) {
+    const via = buildVia(lock.packages, directNames);
     Object.entries(lock.packages).forEach(([key, v]) => {
       if (!key || v.link || !v.version) return;
       const idx = key.lastIndexOf('node_modules/');
-      if (idx !== -1) add(key.slice(idx + 'node_modules/'.length), v.version, v.dev);
+      if (idx !== -1) add(key.slice(idx + 'node_modules/'.length), v.version, v.dev, via.get(key));
     });
   } else if (lock.dependencies) {
     const walk = (deps) => Object.entries(deps).forEach(([name, v]) => {
@@ -45,7 +82,7 @@ const fromLock = (lock) => {
     });
     walk(lock.dependencies);
   }
-  return [...out.values()];
+  return [...out.values()].map((p) => ({ ...p, via: [...p.via].slice(0, 3) }));
 };
 
 export const collectManifests = (rootDir) => {
@@ -61,7 +98,7 @@ export const collectManifests = (rootDir) => {
     const lockPath = path.join(path.dirname(pkgPath), 'package-lock.json');
     const lock = fs.existsSync(lockPath) ? readJson(lockPath) : null;
 
-    let list = lock ? fromLock(lock).map((p) => ({ ...p, direct: p.name in direct, approx: false })) : [];
+    let list = lock ? fromLock(lock, new Set(Object.keys(direct))).map((p) => ({ ...p, direct: p.name in direct, approx: false })) : [];
     const usesLockfile = list.length > 0;
     if (!usesLockfile) {
       list = Object.entries(direct)

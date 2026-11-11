@@ -13,7 +13,8 @@ export const scanDependencies = async (req, res) => {
     if (!p || typeof p.name !== 'string' || typeof p.version !== 'string' || !NAME_RE.test(p.name) || p.version.length > 64) {
       return res.status(400).json({ success: false, error: 'Packages ලැයිස්තුවේ වලංගු නැති අයිතමයක් තියෙනවා.' });
     }
-    clean.push({ name: p.name, version: p.version, direct: !!p.direct, dev: !!p.dev, approx: !!p.approx });
+    const via = Array.isArray(p.via) ? p.via.filter((x) => typeof x === 'string' && NAME_RE.test(x)).slice(0, 3) : [];
+    clean.push({ name: p.name, version: p.version, direct: !!p.direct, dev: !!p.dev, approx: !!p.approx, via });
   }
 
   try {
