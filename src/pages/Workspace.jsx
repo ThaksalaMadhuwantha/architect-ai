@@ -182,6 +182,10 @@ export default function Workspace() {
   const [flow, setFlow] = useState(null);
   const [activeEp, setActiveEp] = useState(null);
 
+  // Architecture health
+  const [arch, setArch] = useState(null);
+  const [archHl, setArchHl] = useState(null);
+
   // Dependency CVE scan (OSV)
   const [deps, setDeps] = useState({ status: 'idle' });
   const [depsDirectOnly, setDepsDirectOnly] = useState(true);
@@ -281,6 +285,8 @@ export default function Workspace() {
     setTruncated(!!meta?.truncated);
     setScan(meta?.scan || null);
     setFlow(meta?.flow || null);
+    setArch(meta?.arch || null);
+    setArchHl(null);
     setActiveEp(null);
     startDepsScan(meta?.manifests);
     setAgent(meta?.scan ? 'sec' : 'arch');
@@ -388,7 +394,7 @@ export default function Workspace() {
 
   // එකම rule එකේ findings එකට කණ්ඩායම් කරනවා (rule එකේ විස්තරය එක පාරයි, ස්ථාන වෙන වෙනම)
   // Endpoint එකක් select කළාම ඒකේ path එක graph එකේ highlight වෙනවා
-  const epSet = useMemo(() => (activeEp ? new Set(activeEp.nodeIds) : null), [activeEp]);
+  const epSet = useMemo(() => (activeEp ? new Set(activeEp.nodeIds) : archHl ? new Set(archHl.nodeIds) : null), [activeEp, archHl]);
   const displayNodes = useMemo(
     () => (epSet ? nodes.map((n) => ({ ...n, className: epSet.has(n.id) ? 'ep-on' : 'ep-dim' })) : nodes),
     [nodes, epSet]
@@ -440,6 +446,7 @@ export default function Workspace() {
   };
 
   const openEndpoint = (ep) => {
+    setArchHl(null);
     setActiveEp(ep);
     if (ep.routeNodeId) {
       selectFile(ep.routeNodeId);
@@ -565,6 +572,59 @@ export default function Workspace() {
       )}
     </div>
   );
+
+  const archCard = arch ? (
+    <div className="space-y-3">
+      <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+        <ScoreRing score={arch.score} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Architecture Health: {arch.label}</p>
+          <p className="text-xs text-slate-400">
+            {arch.metrics.files} files · {arch.metrics.edges} imports · {arch.metrics.cycles} cycle{arch.metrics.cycles === 1 ? '' : 's'}
+          </p>
+          <div className="flex gap-1.5 mt-1.5 text-[11px]">
+            {['high', 'medium', 'low'].map((k) => (
+              <span key={k} className={`px-1.5 py-0.5 rounded border capitalize ${SEV_STYLE[k]}`}>{k} {arch.counts[k]}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500">
+        Score = 100 − (High×10 + Medium×5 + Low×2). Graph algorithms, AI නැතුව.
+        {arch.metrics.layers.length > 0 && ` Layers: ${arch.metrics.layers.join(' → ')}.`}
+      </p>
+      {archHl && <button onClick={() => setArchHl(null)} className="text-xs text-indigo-300 hover:underline">Clear highlight</button>}
+      {arch.issues.length === 0 && (
+        <p className="text-sm text-slate-400 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+          Circular dependencies, layer violations හෝ god files හමුවුණේ නැහැ.
+        </p>
+      )}
+      {arch.issues.map((it, idx) => (
+        <div key={`${it.id}-${idx}`}
+          className={`rounded-lg border p-2.5 space-y-1.5 ${archHl === it ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 bg-slate-950/50'}`}>
+          <button onClick={() => { setActiveEp(null); setArchHl(archHl === it ? null : it); }} className="w-full text-left space-y-1">
+            <div className="flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase ${SEV_STYLE[it.severity]}`}>{it.severity}</span>
+              <span className="text-sm font-medium flex-1">{it.title}</span>
+            </div>
+            <p className="text-[11px] text-slate-300">{it.message}</p>
+            {it.cycle && <p className="text-[11px] text-amber-200 break-all">{it.cycle.map((f) => f.slice(root.length)).join('  →  ')}</p>}
+          </button>
+          <details>
+            <summary className="text-xs text-indigo-300 cursor-pointer">How to fix</summary>
+            <p className="text-xs text-emerald-300/90 mt-1.5">{it.fix}</p>
+            <div className="mt-1.5 space-y-0.5">
+              {it.nodeIds.slice(0, 6).map((nid, i) => (
+                <button key={nid + i} onClick={() => selectFile(nid)} className="block text-[11px] text-indigo-300 hover:underline break-all text-left">
+                  {it.files[i].slice(root.length)}
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+      ))}
+    </div>
+  ) : null;
 
   const securityPanel = !scan ? (
     <p className="text-sm text-slate-500">Project එකක් load කළාම security scan එක ඉබේම run වෙනවා.</p>
@@ -907,6 +967,7 @@ export default function Workspace() {
             ))}
           </div>
 
+          {agent === 'arch' && archCard}
           {agent === 'sec' ? securityPanel : agent === 'flow' ? flowPanel : !selectedNode ? (
             <p className="text-sm text-slate-500">File එකක් select කළාම ඒකේ AI audit සහ details මෙතන පෙනෙනවා.</p>
           ) : (
