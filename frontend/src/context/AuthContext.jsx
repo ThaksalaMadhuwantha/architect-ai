@@ -3,8 +3,8 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
+const GH_TOKEN_KEY = 'architect_ai_gh_token';
 
-// Normalize Supabase user metadata into a clean user object
 const formatUser = (sbUser) => {
   if (!sbUser) return null;
   const meta = sbUser.user_metadata || {};
@@ -20,20 +20,28 @@ const formatUser = (sbUser) => {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
+  const [githubToken, setGithubToken] = useState(() => sessionStorage.getItem(GH_TOKEN_KEY) || '');
   const [loading, setLoading] = useState(true);
 
+  const syncProviderToken = (activeSession) => {
+    if (activeSession?.provider_token) {
+      sessionStorage.setItem(GH_TOKEN_KEY, activeSession.provider_token);
+      setGithubToken(activeSession.provider_token);
+    }
+  };
+
   useEffect(() => {
-    // Load initial session on mount
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       setSession(currentSession);
       setUser(formatUser(currentSession?.user));
+      syncProviderToken(currentSession);
       setLoading(false);
     });
 
-    // Listen for auth state changes (OAuth redirects, sign in, sign out, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       setUser(formatUser(newSession?.user));
+      syncProviderToken(newSession);
       setLoading(false);
     });
 
@@ -49,20 +57,16 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { full_name: name },
-      },
+      options: { data: { full_name: name } },
     });
     if (error) throw error;
   };
 
-  // OAuth login for 'github' or 'google'
   const loginWithOAuth = async (provider) => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: `${window.location.origin}/app`,
-        // Request repo scope on GitHub so private repos can be supported later
         ...(provider === 'github' ? { scopes: 'read:user user:email repo' } : {}),
       },
     });
@@ -71,12 +75,14 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    sessionStorage.removeItem(GH_TOKEN_KEY);
+    setGithubToken('');
     setUser(null);
     setSession(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, login, register, loginWithOAuth, logout }}>
+    <AuthContext.Provider value={{ user, session, githubToken, loading, login, register, loginWithOAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );
