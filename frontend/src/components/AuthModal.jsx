@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  X, Mail, Lock, Eye, EyeOff, User, Check,
+  X, Mail, Lock, Eye, EyeOff, User,
   FileCode, ShieldCheck, Sparkles, Network,
 } from 'lucide-react';
 import Logo from './Logo';
@@ -13,6 +13,15 @@ const GithubIcon = (props) => (
   </svg>
 );
 
+const GoogleIcon = (props) => (
+  <svg viewBox="0 0 24 24" {...props}>
+    <path fill="#EA4335" d="M12 5c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 1.19 14.97 0 12 0 7.31 0 3.25 2.69 1.25 6.63l3.66 2.84C5.77 6.87 8.63 5 12 5z" />
+    <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
+    <path fill="#FBBC05" d="M4.91 14.53c-.22-.66-.35-1.36-.35-2.08s.13-1.42.35-2.08V7.53H1.25C.45 9.12 0 10.92 0 12.45s.45 3.33 1.25 4.92l3.66-2.84z" />
+    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.37 0-6.23-1.87-7.09-4.47l-3.66 2.84C3.25 21.31 7.31 24 12 24z" />
+  </svg>
+);
+
 const perks = [
   { icon: FileCode, text: 'Analyze code architecture' },
   { icon: ShieldCheck, text: 'Detect security vulnerabilities' },
@@ -21,15 +30,15 @@ const perks = [
 ];
 
 export default function AuthModal({ open, mode, setMode, onClose }) {
-  const { login, register } = useAuth();
+  const { login, register, loginWithOAuth } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(true);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
 
   if (!open) return null;
@@ -38,20 +47,38 @@ export default function AuthModal({ open, mode, setMode, onClose }) {
 
   const switchMode = () => {
     setError('');
+    setInfo('');
     setMode(isSignUp ? 'signin' : 'signup');
+  };
+
+  const handleOAuth = async (provider) => {
+    setError('');
+    setInfo('');
+    setLoading(true);
+    try {
+      await loginWithOAuth(provider);
+    } catch (err) {
+      setError(err.message || `Failed to sign in with ${provider}.`);
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setLoading(true);
     try {
-      if (isSignUp) await register(name, email, password, remember);
-      else await login(email, password, remember);
-      onClose();
-      navigate('/app');
+      if (isSignUp) {
+        await register(name, email, password);
+        setInfo('Account created! Check your email for confirmation or sign in.');
+      } else {
+        await login(email, password);
+        onClose();
+        navigate('/app');
+      }
     } catch (err) {
-      setError(err.response?.data?.message || 'Server එකට සම්බන්ධ වෙන්න බැරි වුණා. Backend run වෙනවද බලන්න.');
+      setError(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -110,13 +137,24 @@ export default function AuthModal({ open, mode, setMode, onClose }) {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setError('GitHub login තවම සූදානම් නැහැ. දැනට email එකෙන් sign in වෙන්න.')}
-            className="w-full h-11 flex items-center justify-center gap-2 rounded-lg border border-blue-500/50 text-sm font-medium text-white hover:bg-blue-500/10 transition-colors"
-          >
-            <GithubIcon className="w-5 h-5" /> Continue with GitHub
-          </button>
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleOAuth('github')}
+              className="h-11 flex items-center justify-center gap-2 rounded-lg border border-blue-500/50 text-sm font-medium text-white hover:bg-blue-500/10 transition-colors disabled:opacity-60"
+            >
+              <GithubIcon className="w-4 h-4" /> GitHub
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleOAuth('google')}
+              className="h-11 flex items-center justify-center gap-2 rounded-lg border border-blue-500/50 text-sm font-medium text-white hover:bg-blue-500/10 transition-colors disabled:opacity-60"
+            >
+              <GoogleIcon className="w-4 h-4" /> Google
+            </button>
+          </div>
 
           <div className="flex items-center gap-3 text-xs text-slate-500">
             <div className="flex-1 h-px bg-slate-800" /> OR <div className="flex-1 h-px bg-slate-800" />
@@ -163,21 +201,15 @@ export default function AuthModal({ open, mode, setMode, onClose }) {
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
-            <span
-              className={`w-4 h-4 rounded border flex items-center justify-center ${
-                remember ? 'bg-blue-600 border-blue-500' : 'border-slate-600'
-              }`}
-            >
-              {remember && <Check className="w-3 h-3 text-white" />}
-            </span>
-            <input type="checkbox" className="sr-only" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-            Remember me
-          </label>
-
           {error && (
             <p role="alert" className="text-sm text-red-300 bg-red-950/40 border border-red-900/60 rounded-lg px-3 py-2">
               {error}
+            </p>
+          )}
+
+          {info && (
+            <p className="text-sm text-emerald-300 bg-emerald-950/40 border border-emerald-900/60 rounded-lg px-3 py-2">
+              {info}
             </p>
           )}
 

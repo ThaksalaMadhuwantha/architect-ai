@@ -14,10 +14,10 @@ import { useAuth } from '../context/AuthContext';
 import Logo from '../components/Logo';
 import Markdown from '../components/Markdown';
 
-/* ---------- Graph ---------- */
+/* ---------- Graph Layout ---------- */
 const W = 210, H = 56;
 
-// සියලුම paths වල පොදු root folder එක (repo-name-sha/) හොයනවා
+// Find common root folder across all file paths (e.g. repo-name-sha/)
 const commonRoot = (nodes) => {
   if (!nodes.length) return '';
   const first = nodes[0].data.path.split('/')[0];
@@ -81,7 +81,7 @@ const SEV_STYLE = {
   low: 'bg-slate-500/15 text-slate-300 border-slate-500/40',
 };
 
-/* ---------- File tree ---------- */
+/* ---------- File Tree ---------- */
 const buildTree = (nodes, root) => {
   const tree = { children: {}, files: [] };
   nodes.forEach((n) => {
@@ -151,8 +151,9 @@ export default function Workspace() {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
   const [mobileTab, setMobileTab] = useState('graph');
+  const [avatarErr, setAvatarErr] = useState(false);
 
-  // Load project
+  // Project loader state
   const loadRef = useRef(null);
   const [loadOpen, setLoadOpen] = useState(false);
   const [source, setSource] = useState('github');
@@ -163,7 +164,7 @@ export default function Workspace() {
   const [error, setError] = useState('');
   const [truncated, setTruncated] = useState(false);
 
-  // AI
+  // AI Audit state
   const [analyses, setAnalyses] = useState({}); // { [fileId]: { en, si, ta, hi } }
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -171,27 +172,28 @@ export default function Workspace() {
   const [translating, setTranslating] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
 
-  // Security scan
+  // Security scan state
   const [agent, setAgent] = useState('arch');
   const [scan, setScan] = useState(null);
   const [onlyFile, setOnlyFile] = useState(false);
   const [focusLine, setFocusLine] = useState(null);
   const focusRef = useRef(null);
 
-  // Endpoint flow map
+  // Endpoint flow map state
   const [flow, setFlow] = useState(null);
   const [activeEp, setActiveEp] = useState(null);
 
-  // Architecture health
+  // Architecture health state
   const [arch, setArch] = useState(null);
   const [archHl, setArchHl] = useState(null);
 
-  // Dependency CVE scan (OSV)
+  // Dependency CVE scan (OSV) state
   const [deps, setDeps] = useState({ status: 'idle' });
   const [depsDirectOnly, setDepsDirectOnly] = useState(true);
+  const [depsInfoLang, setDepsInfoLang] = useState('en'); // Static toggle between 'en' and 'si' (no API call)
   const depsToken = useRef(0);
 
-  // AI Mentor (finding එකක් ඇයි වැරදි කියලා පැහැදිලි කිරීම)
+  // AI Mentor state
   const [mentorLang, setMentorLang] = useState('en');
   const [mentor, setMentor] = useState({});
   const [mentorBusy, setMentorBusy] = useState('');
@@ -229,7 +231,7 @@ export default function Workspace() {
     if (focusLine && focusRef.current) focusRef.current.scrollIntoView({ block: 'center' });
   }, [focusLine, selectedId]);
 
-  // පිටතින් click කළාම / Esc ඔබපුවාම dropdown සහ modal වැහෙනවා
+  // Close dropdowns and modals on outside click or Escape key
   useEffect(() => {
     if (!loadOpen && !auditOpen) return;
     const onDown = (e) => {
@@ -257,7 +259,7 @@ export default function Workspace() {
     if (window.innerWidth < 1024) setMobileTab('code');
   };
 
-  // Graph එක පෙන්නපු පස්සේ පසුබිමෙන් dependency scan එක (OSV) run වෙනවා
+  // Run OSV dependency scan in the background after the graph is rendered
   const startDepsScan = async (manifests) => {
     const token = ++depsToken.current;
     const map = new Map();
@@ -272,7 +274,7 @@ export default function Workspace() {
       const res = await api.post('/deps/scan', { packages });
       if (token === depsToken.current) setDeps({ status: 'done', data: res.data.data });
     } catch (err) {
-      if (token === depsToken.current) setDeps({ status: 'error', error: err.response?.data?.error || 'Dependency scan එක අසාර්ථක වුණා.' });
+      if (token === depsToken.current) setDeps({ status: 'error', error: err.response?.data?.error || 'Dependency scan failed.' });
     }
   };
 
@@ -312,7 +314,7 @@ export default function Workspace() {
       const res = await api.post('/parser/upload', formData);
       if (res.data.success) applyGraph(res.data.data, res.data.meta, file.name);
     } catch (err) {
-      handleRequestError(err, 'ZIP File එක Upload කිරීමේදී දෝෂයක් සිදු විය.');
+      handleRequestError(err, 'Failed to upload and parse ZIP file.');
     } finally {
       setLoading(false);
     }
@@ -327,7 +329,7 @@ export default function Workspace() {
       const res = await api.post('/parser/github', { repoUrl: repoUrl.trim(), branch: branch.trim() || undefined });
       if (res.data.success) applyGraph(res.data.data, res.data.meta, res.data.meta?.repo || repoUrl.trim());
     } catch (err) {
-      handleRequestError(err, 'GitHub repo එක analyze කිරීමේදී දෝෂයක් සිදු විය.');
+      handleRequestError(err, 'Failed to analyze GitHub repository.');
     } finally {
       setLoading(false);
     }
@@ -350,13 +352,13 @@ export default function Workspace() {
       }
     } catch (err) {
       if (err.response?.status === 401) return handleLogout();
-      setAiError(err.response?.data?.error || 'AI Analysis ලබාගැනීමට නොහැකි විය. Backend log පරීක්ෂා කරන්න.');
+      setAiError(err.response?.data?.error || 'Unable to get AI Analysis. Check backend logs.');
     } finally {
       setAiLoading(false);
     }
   };
 
-  // භාෂාව මාරු කරනවා. තවම translate කරලා නැත්නම් (හෝ force නම්) විතරක් request එකක් යවනවා
+  // Switch audit display language; triggers translation API only if not cached or forced
   const handleLang = async (code, force = false) => {
     setLang(code);
     setAiError('');
@@ -374,8 +376,8 @@ export default function Workspace() {
       setAiError(
         err.response?.data?.error ||
           (err.response
-            ? `Translate request එක fail වුණා (HTTP ${err.response.status}). Backend එකේ අලුත් files දාලා restart කළාද බලන්න.`
-            : 'Backend එකට සම්බන්ධ වෙන්න බැරි වුණා.')
+            ? `Translation request failed (HTTP ${err.response.status}). Ensure backend is running.`
+            : 'Unable to connect to backend server.')
       );
       setLang('en');
     } finally {
@@ -392,8 +394,7 @@ export default function Workspace() {
     if (!lineSev[f.line] || SEV_ORDER[f.severity] < SEV_ORDER[lineSev[f.line]]) lineSev[f.line] = f.severity;
   });
 
-  // එකම rule එකේ findings එකට කණ්ඩායම් කරනවා (rule එකේ විස්තරය එක පාරයි, ස්ථාන වෙන වෙනම)
-  // Endpoint එකක් select කළාම ඒකේ path එක graph එකේ highlight වෙනවා
+  // Highlight selected endpoint or architecture issue path in the graph
   const epSet = useMemo(() => (activeEp ? new Set(activeEp.nodeIds) : archHl ? new Set(archHl.nodeIds) : null), [activeEp, archHl]);
   const displayNodes = useMemo(
     () => (epSet ? nodes.map((n) => ({ ...n, className: epSet.has(n.id) ? 'ep-on' : 'ep-dim' })) : nodes),
@@ -410,6 +411,7 @@ export default function Workspace() {
     [edges, epSet]
   );
 
+  // Group findings by rule so rule descriptions appear once with multiple locations
   const groups = Object.values(
     shownFindings.reduce((m, f) => {
       (m[f.rule] ||= { rule: f.rule, title: f.title, cwe: f.cwe, fix: f.fix, severity: f.severity, items: [] }).items.push(f);
@@ -423,7 +425,7 @@ export default function Workspace() {
     if (mentor[key] || mentorBusy) return;
     setMentorError('');
     setMentorBusy(key);
-    // Secrets AI එකට යවන්නේ නැහැ: ඒවාට masked snippet එක පමණයි යවන්නේ
+    // Never send raw secrets to AI; only send masked snippets for secret rules
     const secretRule = ['hardcoded-secret', 'jwt-hardcoded', 'secret-fallback'].includes(f.rule);
     const node = nodes.find((n) => n.id === f.nodeId);
     const all = (node?.data.code || '').split('\n');
@@ -439,7 +441,7 @@ export default function Workspace() {
       if (res.data.success) setMentor((m) => ({ ...m, [key]: res.data.mentor }));
     } catch (err) {
       if (err.response?.status === 401) return handleLogout();
-      setMentorError(err.response?.data?.error || 'Mentor පැහැදිලි කිරීම ලබාගන්න බැරි වුණා.');
+      setMentorError(err.response?.data?.error || 'Failed to load Mentor explanation.');
     } finally {
       setMentorBusy('');
     }
@@ -456,7 +458,7 @@ export default function Workspace() {
 
   const flowPanel = !flow || flow.endpoints.length === 0 ? (
     <p className="text-sm text-slate-500">
-      {flow ? 'Express endpoints හොයාගන්න බැරි වුණා (router.get / router.post ... නැති project එකක්).' : 'Project එකක් load කළාම endpoint map එක ඉබේම හැදෙනවා.'}
+      {flow ? 'No Express endpoints found (project has no router.get / router.post definitions).' : 'Load a project to automatically generate the endpoint map.'}
     </p>
   ) : (
     <div className="space-y-3">
@@ -469,7 +471,7 @@ export default function Workspace() {
         ))}
       </div>
       <p className="text-[11px] text-slate-500">
-        Endpoint එකක් click කළාම graph එකේ ඒකේ path එක (route → middleware → controller → model) highlight වෙනවා. Login/register වගේ public by design: {flow.stats.public}.
+        Click an endpoint to highlight its execution path (route → middleware → controller → model) on the graph. Public by design (e.g. login/register): {flow.stats.public}.
       </p>
       {activeEp && (
         <button onClick={() => setActiveEp(null)} className="text-xs text-indigo-300 hover:underline">Clear highlight</button>
@@ -498,7 +500,7 @@ export default function Workspace() {
 
   const depsList = deps.status === 'done' ? deps.data.packages.filter((p) => !depsDirectOnly || p.direct) : [];
   const depsCounts = { high: 0, medium: 0, low: 0 };
-  // කොයි direct package එකෙන්ද වැඩිම vulnerable transitive ගණනක් ආවේ
+  // Identify which direct packages introduce the most vulnerable transitive dependencies
   const viaCounts = {};
   if (deps.status === 'done') {
     deps.data.packages.filter((p) => !p.direct).forEach((p) => (p.via || []).forEach((v) => { viaCounts[v] = (viaCounts[v] || 0) + 1; }));
@@ -512,15 +514,46 @@ export default function Workspace() {
         {deps.status === 'loading' && <span className="text-[11px] text-indigo-300 animate-pulse">Scanning…</span>}
       </div>
       <details className="text-[11px] text-slate-400">
-        <summary className="cursor-pointer text-indigo-300">මේක මොකක්ද?</summary>
-        <p className="mt-1.5 leading-relaxed">
-          ඔයාගේ project එක වෙනත් අය හදපු packages (npm) පාවිච්චි කරනවා, ඒවා ඇතුළේ තවත් packages ගොඩක් තියෙනවා.
-          සමහර versions වල ප්‍රසිද්ධියේ දන්නා ආරක්ෂක දුර්වලතා තියෙනවා. මේ list එකෙන් පෙන්නන්නේ ඔයාගේ ඇත්තම versions
-          ඒ දුර්වලතා database එකට (OSV) සසඳලා හොයාගත් ඒවා. විසඳුම: &quot;Fixed in&quot; version එකට upgrade කිරීම.
-          මුලින් <b>Direct</b> ඒවා බලන්න, ඒවා update කළාම බොහෝ transitive ඒවා ඉබේම ඉවත් වෙනවා.
-        </p>
+        <summary className="cursor-pointer text-indigo-300">What is this?</summary>
+        <div className="mt-2 space-y-2 rounded-lg border border-slate-800/80 bg-slate-900/50 p-2.5">
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => setDepsInfoLang('en')}
+              className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                depsInfoLang === 'en' ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 text-slate-400 hover:text-white'
+              }`}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              onClick={() => setDepsInfoLang('si')}
+              className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                depsInfoLang === 'si' ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 text-slate-400 hover:text-white'
+              }`}
+            >
+              සිංහල
+            </button>
+          </div>
+          {depsInfoLang === 'en' ? (
+            <p className="leading-relaxed">
+              Your project relies on third-party npm packages, which in turn pull in many nested (transitive) packages.
+              Some package versions contain publicly disclosed security vulnerabilities. This list checks your exact
+              versions against the Open Source Vulnerabilities (OSV) database. Fix: upgrade to the &quot;Fixed in&quot;
+              version. Start with <b>Direct</b> dependencies first—updating them automatically resolves most transitive issues.
+            </p>
+          ) : (
+            <p className="leading-relaxed">
+              ඔයාගේ project එක වෙනත් අය හදපු packages (npm) පාවිච්චි කරනවා, ඒවා ඇතුළේ තවත් packages ගොඩක් තියෙනවා.
+              සමහර versions වල ප්‍රසිද්ධියේ දන්නා ආරක්ෂක දුර්වලතා තියෙනවා. මේ list එකෙන් පෙන්නන්නේ ඔයාගේ ඇත්තම versions
+              ඒ දුර්වලතා database එකට (OSV) සසඳලා හොයාගත් ඒවා. විසඳුම: &quot;Fixed in&quot; version එකට upgrade කිරීම.
+              මුලින් <b>Direct</b> ඒවා බලන්න, ඒවා update කළාම බොහෝ transitive ඒවා ඉබේම ඉවත් වෙනවා.
+            </p>
+          )}
+        </div>
       </details>
-      {deps.status === 'none' && <p className="text-xs text-slate-500">package.json හොයාගන්න බැරි වුණා.</p>}
+      {deps.status === 'none' && <p className="text-xs text-slate-500">No package.json found.</p>}
       {deps.status === 'error' && <p className="text-xs text-red-300">{deps.error}</p>}
       {deps.status === 'done' && (
         <>
@@ -533,7 +566,7 @@ export default function Workspace() {
             ))}
           </div>
           {deps.data.stats.approx > 0 && (
-            <p className="text-[11px] text-amber-300">Lockfile නැති නිසා versions {deps.data.stats.approx}ක් package.json range එකෙන් ඇස්තමේන්තු කළ ඒවා.</p>
+            <p className="text-[11px] text-amber-300">No lockfile found; {deps.data.stats.approx} versions were estimated from package.json ranges.</p>
           )}
           <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950/60 border border-slate-800 text-xs">
             {[[true, 'Direct'], [false, 'All (incl. transitive)']].map(([v, label]) => (
@@ -545,11 +578,11 @@ export default function Workspace() {
           </div>
           {viaTop.length > 0 && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-200 space-y-1">
-              <p className="font-semibold">මුලින් update කරන්න (මේවා නිසා transitive vulnerabilities ආවා):</p>
-              {viaTop.map(([name, n]) => <p key={name}><span className="font-mono">{name}</span> → vulnerable packages {n}ක්</p>)}
+              <p className="font-semibold">Update these first (introducing transitive vulnerabilities):</p>
+              {viaTop.map(([name, n]) => <p key={name}><span className="font-mono">{name}</span> → {n} vulnerable packages</p>)}
             </div>
           )}
-          {depsList.length === 0 && <p className="text-xs text-slate-400">මේ ගණයේ දන්නා vulnerabilities නැහැ.</p>}
+          {depsList.length === 0 && <p className="text-xs text-slate-400">No known vulnerabilities in this category.</p>}
           {depsList.map((p) => (
             <details key={`${p.name}@${p.version}`} className="rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-2">
               <summary className="cursor-pointer flex items-center gap-2 text-xs">
@@ -590,13 +623,13 @@ export default function Workspace() {
         </div>
       </div>
       <p className="text-[11px] text-slate-500">
-        Score = 100 − (High×10 + Medium×5 + Low×2). Graph algorithms, AI නැතුව.
+        Score = 100 − (High×10 + Medium×5 + Low×2). Computed via deterministic graph algorithms.
         {arch.metrics.layers.length > 0 && ` Layers: ${arch.metrics.layers.join(' → ')}.`}
       </p>
       {archHl && <button onClick={() => setArchHl(null)} className="text-xs text-indigo-300 hover:underline">Clear highlight</button>}
       {arch.issues.length === 0 && (
         <p className="text-sm text-slate-400 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-          Circular dependencies, layer violations හෝ god files හමුවුණේ නැහැ.
+          No circular dependencies, layer violations, or god files detected.
         </p>
       )}
       {arch.issues.map((it, idx) => (
@@ -627,7 +660,7 @@ export default function Workspace() {
   ) : null;
 
   const securityPanel = !scan ? (
-    <p className="text-sm text-slate-500">Project එකක් load කළාම security scan එක ඉබේම run වෙනවා.</p>
+    <p className="text-sm text-slate-500">Load a project to automatically run the security scan.</p>
   ) : (
     <div className="space-y-4">
       <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
@@ -643,7 +676,7 @@ export default function Workspace() {
         </div>
       </div>
       <p className="text-[11px] text-slate-500">
-        Score = 100 − (High×10 + Medium×4 + Low×1). Rule-based scan (AST), AI නැතුව, නොමිලේ.
+        Score = 100 − (High×10 + Medium×4 + Low×1). Fast AST rule-based static scan.
       </p>
 
       {depsCard}
@@ -660,7 +693,7 @@ export default function Workspace() {
       )}
 
       <div className="space-y-1.5">
-        <p className="text-[11px] text-slate-400">🎓 Mentor භාෂාව (finding එකක් විවෘත කරලා &quot;Explain&quot; ඔබන්න):</p>
+        <p className="text-[11px] text-slate-400">🎓 Mentor Language (open a finding and click &quot;Explain&quot;):</p>
         <div className="flex flex-wrap gap-1.5">
           {LANGS.map(([code, label]) => (
             <button key={code} onClick={() => setMentorLang(code)}
@@ -676,7 +709,7 @@ export default function Workspace() {
 
       {groups.length === 0 ? (
         <p className="text-sm text-slate-400 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-          No issues found by the current rules. මෙය ආරක්ෂාවේ සහතිකයක් නෙවෙයි, rules ගණන සීමිතයි.
+          No issues found by the current rules. Note that automated rules cover common patterns and are not a complete security guarantee.
         </p>
       ) : (
         groups.map((g) => (
@@ -733,7 +766,7 @@ export default function Workspace() {
   const codeLines = (selectedNode?.data.code || selectedNode?.data.codeSnippet || '').split('\n');
   const panel = 'rounded-xl border border-blue-500/20 bg-[#070c24]';
 
-  // Audit result (side panel එකේත්, full-view modal එකේත් පාවිච්චි වෙනවා)
+  // Audit result view (used in both side panel and full-screen modal)
   const auditView = (large) => (
     <div className={large ? '' : 'bg-indigo-950/40 border border-indigo-800/50 p-3 rounded-xl'}>
       <div className="flex items-center justify-between mb-2">
@@ -755,7 +788,7 @@ export default function Workspace() {
           </button>
         ))}
         {lang !== 'en' && !translating && (
-          <button onClick={() => handleLang(lang, true)} title="නැවත translate කරන්න (free request එකක් වැය වෙනවා)"
+          <button onClick={() => handleLang(lang, true)} title="Retry translation"
             className="ml-auto px-2.5 py-1 rounded-md text-xs border border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500">
             ↻ Retry
           </button>
@@ -772,9 +805,11 @@ export default function Workspace() {
     </div>
   );
 
+  const userInitial = (user?.name || user?.email || 'D').charAt(0).toUpperCase();
+
   return (
     <div className="h-dvh flex flex-col bg-[#050816] text-slate-100 font-sans overflow-hidden">
-      {/* ===== Top bar ===== */}
+      {/* ===== Top Bar ===== */}
       <header className="h-14 sm:h-16 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-5 border-b border-blue-500/20 bg-[#070c24]">
         <div className="flex items-center gap-4 min-w-0">
           <span className="hidden sm:block"><Logo size={30} /></span>
@@ -839,11 +874,25 @@ export default function Workspace() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* User Profile & Logout */}
+        <div className="flex items-center gap-2.5 sm:gap-3">
           <div className="text-right hidden md:block">
             <p className="text-sm font-medium leading-tight">{user?.name}</p>
             <p className="text-xs text-slate-400">{user?.email}</p>
           </div>
+          {user?.avatar && !avatarErr ? (
+            <img
+              src={user.avatar}
+              alt={user?.name || 'User avatar'}
+              onError={() => setAvatarErr(true)}
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-full object-cover border border-indigo-500/50 shrink-0"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center text-sm font-semibold text-indigo-200 shrink-0">
+              {userInitial}
+            </div>
+          )}
           <button onClick={handleLogout} title="Logout" className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
             <LogOut className="w-4 h-4" />
           </button>
@@ -853,7 +902,7 @@ export default function Workspace() {
 
       {/* ===== Body ===== */}
       <div className="flex-1 min-h-0 flex flex-col p-2 sm:p-3 lg:grid lg:grid-cols-[260px_minmax(0,1fr)_minmax(340px,28vw)] lg:gap-3">
-        {/* Left: files + stats */}
+        {/* Left: Files + Stats */}
         <aside className={`${mobileTab === 'files' ? 'flex' : 'hidden'} lg:flex flex-col gap-3 min-h-0 flex-1`}>
           <section className={`${panel} flex-1 min-h-0 flex flex-col p-3`}>
             <h2 className="text-sm font-semibold mb-2.5 flex items-center gap-2"><Folder className="w-4 h-4 text-blue-300" /> Project Files</h2>
@@ -863,7 +912,7 @@ export default function Workspace() {
                 className="flex-1 bg-transparent outline-none text-sm placeholder:text-slate-500" />
             </div>
             <div className="flex-1 overflow-y-auto -mx-1 px-1">
-              {nodes.length === 0 && <p className="text-xs text-slate-500 p-2">Project එකක් load කරන්න.</p>}
+              {nodes.length === 0 && <p className="text-xs text-slate-500 p-2">Load a project to browse files.</p>}
               {matches
                 ? matches.map((f) => (
                     <button key={f.id} className={`tree-row ${selectedId === f.id ? 'active' : ''}`} onClick={() => selectFile(f.id)}>
@@ -888,11 +937,11 @@ export default function Workspace() {
                 Most depended on: <span className="text-indigo-300">{stats.hub.label}</span> ({stats.hub.count})
               </p>
             )}
-            {truncated && <p className="text-xs text-amber-300 px-1">පළමු files 600 විතරයි පෙන්නන්නේ.</p>}
+            {truncated && <p className="text-xs text-amber-300 px-1">Showing the first 600 files only.</p>}
           </section>
         </aside>
 
-        {/* Center: graph + code */}
+        {/* Center: Graph + Code Viewer */}
         <main className={`${mobileTab === 'graph' || mobileTab === 'code' ? 'flex' : 'hidden'} lg:flex flex-col gap-3 min-h-0 min-w-0 flex-1`}>
           <section className={`${panel} ${mobileTab === 'graph' ? 'block' : 'hidden'} lg:block flex-1 min-h-0 relative overflow-hidden`}>
             <div className="absolute top-3 left-4 z-10 flex items-center gap-2 text-sm font-semibold pointer-events-none">
@@ -942,7 +991,7 @@ export default function Workspace() {
                       <span className="whitespace-pre text-slate-300">{l}</span>
                     </div>
                   ))
-                : <p className="px-4 text-slate-500 font-sans text-sm">Graph එකේ හෝ file tree එකේ file එකක් select කරන්න.</p>}
+                : <p className="px-4 text-slate-500 font-sans text-sm">Select a file from the graph or file tree to inspect its source code.</p>}
             </div>
             <div className="flex items-center gap-2 sm:gap-3 px-3 py-2 border-t border-blue-500/15">
               <Sparkles className="w-4 h-4 text-indigo-300 shrink-0" />
@@ -954,7 +1003,7 @@ export default function Workspace() {
           </section>
         </main>
 
-        {/* Right: AI panel */}
+        {/* Right: AI Insights & Security Panel */}
         <aside className={`${panel} ${mobileTab === 'ai' ? 'block' : 'hidden'} lg:block flex-1 lg:flex-none min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4`}>
           <div className="flex gap-2">
             {AGENTS.map(({ id, label, icon: Icon, ready }) => (
@@ -969,7 +1018,7 @@ export default function Workspace() {
 
           {agent === 'arch' && archCard}
           {agent === 'sec' ? securityPanel : agent === 'flow' ? flowPanel : !selectedNode ? (
-            <p className="text-sm text-slate-500">File එකක් select කළාම ඒකේ AI audit සහ details මෙතන පෙනෙනවා.</p>
+            <p className="text-sm text-slate-500">Select a file to view its AI architecture audit and details.</p>
           ) : (
             <>
               <div className="flex items-center justify-between gap-2">
@@ -1010,7 +1059,7 @@ export default function Workspace() {
         </aside>
       </div>
 
-      {/* Mobile bottom tabs */}
+      {/* Mobile Bottom Navigation */}
       <nav className="lg:hidden shrink-0 grid grid-cols-4 border-t border-blue-500/20 bg-[#070c24] pb-[env(safe-area-inset-bottom)]">
         {MOBILE_TABS.map(([id, label, Icon]) => (
           <button key={id} onClick={() => setMobileTab(id)}
@@ -1020,7 +1069,7 @@ export default function Workspace() {
         ))}
       </nav>
 
-      {/* Audit full view */}
+      {/* Audit Full View Modal */}
       {auditOpen && analysis.en && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70 backdrop-blur-sm"
           onMouseDown={(e) => e.target === e.currentTarget && setAuditOpen(false)}>

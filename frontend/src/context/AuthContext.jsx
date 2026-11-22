@@ -1,45 +1,82 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState } from 'react';
-import api, { getToken, setToken, clearToken } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
 
+// Normalize Supabase user metadata into a clean user object
+const formatUser = (sbUser) => {
+  if (!sbUser) return null;
+  const meta = sbUser.user_metadata || {};
+  return {
+    id: sbUser.id,
+    email: sbUser.email,
+    name: meta.full_name || meta.name || meta.user_name || sbUser.email?.split('@')[0] || 'Developer',
+    avatar: meta.avatar_url || meta.picture || '',
+    provider: sbUser.app_metadata?.provider || 'email',
+  };
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Token එකක් තියෙනවා නම් විතරයි මුලින් loading පෙන්නන්නේ
-  const [loading, setLoading] = useState(() => !!getToken());
-
-  // Page එක load වෙද්දී token එක තියෙනවා නම් user ව නැවත ගන්නවා
   useEffect(() => {
-    if (!getToken()) return;
+    // Load initial session on mount
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      setSession(currentSession);
+      setUser(formatUser(currentSession?.user));
+      setLoading(false);
+    });
 
-    api
-      .get('/auth/me')
-      .then((res) => setUser(res.data.user))
-      .catch(() => clearToken())
-      .finally(() => setLoading(false));
+    // Listen for auth state changes (OAuth redirects, sign in, sign out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setUser(formatUser(newSession?.user));
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (email, password, remember = true) => {
-    const res = await api.post('/auth/login', { email, password });
-    setToken(res.data.token, remember);
-    setUser(res.data.user);
+  const login = async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   };
 
-  const register = async (name, email, password, remember = true) => {
-    const res = await api.post('/auth/register', { name, email, password });
-    setToken(res.data.token, remember);
-    setUser(res.data.user);
+  const register = async (name, email, password) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name },
+      },
+    });
+    if (error) throw error;
   };
 
-  const logout = () => {
-    clearToken();
+  // OAuth login for 'github' or 'google'
+  const loginWithOAuth = async (provider) => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/app`,
+        // Request repo scope on GitHub so private repos can be supported later
+        ...(provider === 'github' ? { scopes: 'read:user user:email repo' } : {}),
+      },
+    });
+    if (error) throw error;
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
+    setSession(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, session, loading, login, register, loginWithOAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );

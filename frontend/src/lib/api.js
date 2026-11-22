@@ -1,25 +1,16 @@
 import axios from 'axios';
+import { supabase } from './supabase';
 
-const TOKEN_KEY = 'architect_token';
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1',
+});
 
-export const getToken = () =>
-  localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
-
-export const setToken = (token, remember = true) => {
-  clearToken();
-  (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
-};
-
-export const clearToken = () => {
-  localStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem(TOKEN_KEY);
-};
-
-const api = axios.create({ baseURL: 'http://localhost:5000/api/v1' });
-
-api.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+// Automatically attach the active Supabase session token to every backend request
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
+  }
   return config;
 });
 
