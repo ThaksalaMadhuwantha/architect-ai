@@ -1,15 +1,39 @@
 import { useState } from 'react';
 import {
   Sparkles, ShieldAlert, Code2, Zap, ShieldCheck, Check, RotateCcw,
-  Copy, GitPullRequest, Download, ExternalLink, Maximize2, X,
+  Copy, GitPullRequest, Download, ExternalLink, Maximize2, X, GitBranch, Info,
 } from 'lucide-react';
 import api from '../lib/api';
 
 const MODES = [
-  { id: 'security', label: 'Fix Security', icon: ShieldAlert, desc: 'Patch vulnerabilities & sanitize inputs' },
-  { id: 'clean', label: 'Clean & SOLID', icon: Code2, desc: 'Improve readability & modularity' },
-  { id: 'modernize', label: 'Modernize', icon: Zap, desc: 'Upgrade to async/await & ES6+' },
-  { id: 'resilience', label: 'Resilience', icon: ShieldCheck, desc: 'Add error handling & validation' },
+  {
+    id: 'security',
+    label: 'Fix Security',
+    icon: ShieldAlert,
+    en: 'Patches security vulnerabilities (SQL/NoSQL injection, XSS, weak auth, hardcoded secrets) and sanitizes user inputs without changing core logic.',
+    si: 'ආරක්ෂක දුර්වලතා (Injection, XSS, දුර්වල Auth, Hardcoded secrets) නිවැරදි කර user inputs ආරක්ෂිතව පරීක්ෂා (sanitize) කරයි.',
+  },
+  {
+    id: 'clean',
+    label: 'Clean & SOLID',
+    icon: Code2,
+    en: 'Breaks down large functions into smaller reusable helpers, improves variable naming, removes duplication, and applies SOLID design principles.',
+    si: 'දිගු functions කුඩා කොටස් වලට වෙන් කර, පැහැදිලි නම් (naming) යොදා, අනවශ්‍ය නැවත ලිවීම් ඉවත් කර SOLID මූලධර්ම අනුව code එක පිරිසිදු කරයි.',
+  },
+  {
+    id: 'modernize',
+    label: 'Modernize',
+    icon: Zap,
+    en: 'Upgrades legacy callbacks or Promise chains to clean async/await, modern ES6+ syntax (optional chaining, destructuring), and modern standard APIs.',
+    si: 'පැරණි callbacks සහ Promise chains වෙනුවට නවීන async/await සහ ES6+ ක්‍රම (optional chaining, destructuring) යොදා code එක අලුත් කරයි.',
+  },
+  {
+    id: 'resilience',
+    label: 'Resilience',
+    icon: ShieldCheck,
+    en: 'Adds proper try/catch error handling, null/undefined boundary checks, safe fallbacks, and meaningful HTTP/error responses to prevent crashes.',
+    si: 'හදිසි crash වීම් වැළැක්වීමට try/catch error handling, null/undefined පරීක්ෂා සහ පැහැදිලි error responses එකතු කරයි.',
+  },
 ];
 
 // Simple line-by-line LCS diff generator for visual comparison
@@ -19,7 +43,6 @@ const computeLineDiff = (oldText, newText) => {
   const m = a.length;
   const n = b.length;
 
-  // Fallback for very large files to keep UI instantaneous
   if (m * n > 250000) {
     return [
       ...a.map((line) => ({ type: 'del', line })),
@@ -53,6 +76,15 @@ const computeLineDiff = (oldText, newText) => {
   return out;
 };
 
+// Sanitize user-entered Git branch name
+const sanitizeBranchName = (raw) =>
+  raw
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9/_.-]/g, '')
+    .replace(/\/+/g, '/')
+    .replace(/^[/.]+|[/.]+$/g, '');
+
 export default function RefactorPanel({
   selectedNode,
   shortPath,
@@ -66,6 +98,7 @@ export default function RefactorPanel({
   onUnauthorized,
 }) {
   const [mode, setMode] = useState('security');
+  const [goalInfoLang, setGoalInfoLang] = useState('en');
   const [results, setResults] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -74,6 +107,7 @@ export default function RefactorPanel({
   const [diffModalOpen, setDiffModalOpen] = useState(false);
 
   // GitHub Pull Request push state
+  const [customBranch, setCustomBranch] = useState('');
   const [prBusy, setPrBusy] = useState(false);
   const [prResult, setPrResult] = useState(null);
   const [prError, setPrError] = useState('');
@@ -82,6 +116,7 @@ export default function RefactorPanel({
   const activePatch = selectedNode ? appliedPatches[selectedNode.id] : null;
   const cacheKey = selectedNode ? `${selectedNode.id}:${mode}` : '';
   const result = results[cacheKey] || null;
+  const activeModeObj = MODES.find((m) => m.id === mode) || MODES[0];
 
   const originalCode = activePatch
     ? activePatch.originalCode
@@ -133,9 +168,11 @@ export default function RefactorPanel({
         path: p.path,
         code: p.patchedCode,
       }));
+      const cleanBranch = sanitizeBranchName(customBranch);
       const res = await api.post('/parser/push-pr', {
         repo: repoMeta.repo,
         baseBranch: repoMeta.branch,
+        newBranch: cleanBranch || undefined,
         files,
         githubToken,
       });
@@ -182,7 +219,7 @@ export default function RefactorPanel({
 
   return (
     <div className="space-y-4">
-      {/* Sandbox Export & GitHub PR Banner (Visible whenever >= 1 fix is applied) */}
+      {/* Sandbox Export & GitHub PR Banner */}
       {patchCount > 0 && (
         <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/25 p-3 space-y-2.5">
           <div className="flex items-center justify-between">
@@ -193,6 +230,23 @@ export default function RefactorPanel({
               Live Preview
             </span>
           </div>
+
+          {/* Developer Custom Branch Name Input */}
+          {repoMeta?.source === 'github' && repoMeta?.repo && githubToken && (
+            <div className="space-y-1">
+              <label className="text-[11px] text-slate-300 flex items-center gap-1.5">
+                <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+                Target PR Branch Name <span className="text-slate-500">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={customBranch}
+                onChange={(e) => setCustomBranch(e.target.value)}
+                placeholder="e.g. fix/auth-security-patch"
+                className="w-full h-8 px-2.5 rounded-lg border border-emerald-500/30 bg-slate-950/80 text-xs font-mono text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-400"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-2">
             {repoMeta?.source === 'github' && repoMeta?.repo && (
@@ -274,8 +328,35 @@ export default function RefactorPanel({
           </div>
 
           {/* Goal Preset Selector */}
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-slate-400">Refactoring Goal</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium text-slate-400">Refactoring Goal</p>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setGoalInfoLang('en')}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    goalInfoLang === 'en'
+                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                      : 'border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoalInfoLang('si')}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    goalInfoLang === 'si'
+                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                      : 'border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  සිංහල
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-1.5">
               {MODES.map(({ id, label, icon: Icon }) => (
                 <button
@@ -295,6 +376,32 @@ export default function RefactorPanel({
                 </button>
               ))}
             </div>
+
+            {/* Bilingual Explanation Box for the Selected Goal */}
+            <div className="rounded-lg border border-white/10 bg-slate-950/60 p-2.5 flex items-start gap-2">
+              <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5 min-w-0">
+                <p className="text-[11px] font-semibold text-indigo-200">{activeModeObj.label}</p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {goalInfoLang === 'si' ? activeModeObj.si : activeModeObj.en}
+                </p>
+              </div>
+            </div>
+
+            {/* Collapsible Guide for All 4 Refactoring Modes */}
+            <details className="text-[11px] text-slate-400">
+              <summary className="cursor-pointer text-indigo-300 hover:underline">
+                {goalInfoLang === 'si' ? 'සියලුම විකල්ප 4 පිළිබඳ විස්තරය බලන්න' : 'Compare all 4 refactoring goals'}
+              </summary>
+              <div className="mt-2 space-y-2 rounded-lg border border-white/10 bg-slate-950/70 p-2.5">
+                {MODES.map((m) => (
+                  <div key={m.id} className="space-y-0.5">
+                    <p className="font-semibold text-slate-200">{m.label}</p>
+                    <p className="text-slate-400 leading-relaxed">{goalInfoLang === 'si' ? m.si : m.en}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           </div>
 
           <button

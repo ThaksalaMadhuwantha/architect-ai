@@ -1,134 +1,173 @@
-const GH_API = 'https://api.github.com';
+// Sanitize developer-provided branch name to conform to Git ref rules
+const sanitizeBranchName = (raw) =>
+  String(raw || '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9/_.-]/g, '')
+    .replace(/\/+/g, '/')
+    .replace(/^[/.]+|[/.]+$/g, '');
 
-const ghFetch = async (url, token, options = {}) => {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
+export const createFixPullRequest = async (req, res) => {
+  try {
+    const { repo, baseBranch, newBranch, files, githubToken } = req.body || {};
+
+    if (!repo || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ success: false, error: 'Repository and patched files are required.' });
+    }
+    if (!githubToken) {
+      return res.status(401).json({ success: false, error: 'GitHub OAuth token is required to create a Pull Request.' });
+    }
+
+    const [owner, repoName] = repo.split('/');
+    if (!owner || !repoName) {
+      return res.status(400).json({ success: false, error: 'Invalid repository format. Expected owner/repo.' });
+    }
+
+    const ghHeaders = {
+      Authorization: `Bearer ${githubToken}`,
       Accept: 'application/vnd.github+json',
       'User-Agent': 'ArchitectAI',
       'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data.message || `GitHub API error (${res.status})`;
-    const err = new Error(msg);
-    err.status = res.status;
-    throw err;
-  }
-  return data;
-};
+    };
 
-// Strip the root folder prefix added by GitHub zipballs (e.g. "repo-main/src/app.js" -> "src/app.js")
-const cleanRepoPath = (filePath) => {
-  const parts = filePath.replace(/^\/+/, '').split('/');
-  return parts.length > 1 ? parts.slice(1).join('/') : filePath;
-};
-
-export const createFixPullRequest = async (req, res) => {
-  const { repo, baseBranch, files, githubToken } = req.body || {};
-
-  if (!githubToken) {
-    return res.status(400).json({
-      success: false,
-      error: 'GitHub access token is missing. Please sign in with GitHub to create Pull Requests.',
-    });
-  }
-
-  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-    return res.status(400).json({ success: false, error: 'Valid repository (owner/repo) is required.' });
-  }
-
-  if (!Array.isArray(files) || files.length === 0 || files.length > 30) {
-    return res.status(400).json({ success: false, error: 'Provide between 1 and 30 modified files.' });
-  }
-
-  try {
-    // 1. Fetch repository metadata to resolve the default branch
-    const repoInfo = await ghFetch(`${GH_API}/repos/${repo}`, githubToken);
-    const targetBase = baseBranch || repoInfo.default_branch || 'main';
-
-    // 2. Get the latest commit SHA on the base branch
-    const baseRef = await ghFetch(`${GH_API}/repos/${repo}/git/ref/heads/${encodeURIComponent(targetBase)}`, githubToken);
-    const baseSha = baseRef.object.sha;
-
-    // 3. Create a new fix branch
-    const branchName = `architect-ai/fixes-${Date.now().toString(36)}`;
-    await ghFetch(`${GH_API}/repos/${repo}/git/refs`, githubToken, {
-      method: 'POST',
-      body: JSON.stringify({
-        ref: `refs/heads/${branchName}`,
-        sha: baseSha,
-      }),
-    });
-
-    // 4. Commit each modified file onto the new branch
-    const committedFiles = [];
-    for (const f of files) {
-      const repoPath = cleanRepoPath(f.path);
-      let existingSha;
-      try {
-        const existing = await ghFetch(
-          `${GH_API}/repos/${repo}/contents/${repoPath}?ref=${encodeURIComponent(branchName)}`,
-          githubToken
-        );
-        existingSha = existing.sha;
-      } catch {
-        // File might be new or path differs; proceed without sha if not found
+    // 1. Resolve default branch if baseBranch was not specified
+    let targetBase = baseBranch?.trim();
+    if (!targetBase) {
+      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}`, { headers: ghHeaders });
+      const repoData = await repoRes.json();
+      if (!repoRes.ok) {
+        return res.status(repoRes.status).json({
+          success: false,
+          error: repoData.message || 'Unable to access repository on GitHub.',
+        });
       }
-
-      await ghFetch(`${GH_API}/repos/${repo}/contents/${repoPath}`, githubToken, {
-        method: 'PUT',
-        body: JSON.stringify({
-          message: `fix(${repoPath}): apply ArchitectAI refactor & security fixes`,
-          content: Buffer.from(String(f.code), 'utf-8').toString('base64'),
-          branch: branchName,
-          ...(existingSha ? { sha: existingSha } : {}),
-        }),
-      });
-      committedFiles.push(repoPath);
+      targetBase = repoData.default_branch || 'main';
     }
 
-    // 5. Open a Pull Request targeting the base branch
-    const prBody = [
-      '## ArchitectAI Automated Fixes & Refactoring',
-      '',
-      'This Pull Request was generated from your **ArchitectAI** sandbox session.',
-      '',
-      '### Modified Files:',
-      ...committedFiles.map((p) => `- \`${p}\``),
-      '',
-      '> Review the diff carefully before merging into your main branch.',
-    ].join('\n');
+    // 2. Get latest commit SHA of targetBase
+    const refRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/git/ref/heads/${encodeURIComponent(targetBase)}`,
+      { headers: ghHeaders }
+    );
+    const refData = await refRes.json();
+    if (!refRes.ok) {
+      return res.status(refRes.status).json({
+        success: false,
+        error: refData.message || `Base branch "${targetBase}" not found.`,
+      });
+    }
+    const baseSha = refData.object.sha;
 
-    const pr = await ghFetch(`${GH_API}/repos/${repo}/pulls`, githubToken, {
+    // 3. Create new branch (use developer's custom branch name if provided, else fallback)
+    const sanitizedCustom = sanitizeBranchName(newBranch);
+    let branchName = sanitizedCustom || `architect-ai/fixes-${Date.now().toString(36)}`;
+
+    let createRefRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
       method: 'POST',
+      headers: ghHeaders,
+      body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: baseSha }),
+    });
+
+    // If the custom branch name already exists on GitHub, append a short unique suffix
+    if (createRefRes.status === 422 && sanitizedCustom) {
+      branchName = `${sanitizedCustom}-${Date.now().toString(36).slice(-4)}`;
+      createRefRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
+        method: 'POST',
+        headers: ghHeaders,
+        body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: baseSha }),
+      });
+    }
+
+    const createRefData = await createRefRes.json();
+    if (!createRefRes.ok) {
+      return res.status(createRefRes.status).json({
+        success: false,
+        error: createRefData.message || 'Failed to create branch on GitHub. Ensure you have write access to this repository.',
+      });
+    }
+
+    // 4. Commit each patched file onto the new branch
+    const stripRoot = files.every((f) => f.path.includes('/'))
+      ? `${files[0].path.split('/')[0]}/`
+      : '';
+
+    const committedPaths = [];
+
+    for (const file of files) {
+      const repoFilePath = stripRoot && file.path.startsWith(stripRoot)
+        ? file.path.slice(stripRoot.length)
+        : file.path;
+
+      const encodedPath = repoFilePath.split('/').map(encodeURIComponent).join('/');
+      const fileGetRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repoName}/contents/${encodedPath}?ref=${encodeURIComponent(branchName)}`,
+        { headers: ghHeaders }
+      );
+      const fileGetData = await fileGetRes.json();
+      if (!fileGetRes.ok) {
+        return res.status(fileGetRes.status).json({
+          success: false,
+          error: `Could not locate "${repoFilePath}" in repository.`,
+        });
+      }
+
+      const updateRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repoName}/contents/${encodedPath}`,
+        {
+          method: 'PUT',
+          headers: ghHeaders,
+          body: JSON.stringify({
+            message: `fix(security): apply ArchitectAI refactor to ${repoFilePath}`,
+            content: Buffer.from(file.code, 'utf8').toString('base64'),
+            sha: fileGetData.sha,
+            branch: branchName,
+          }),
+        }
+      );
+
+      if (!updateRes.ok) {
+        const updateErr = await updateRes.json();
+        return res.status(updateRes.status).json({
+          success: false,
+          error: updateErr.message || `Failed to commit ${repoFilePath}.`,
+        });
+      }
+
+      committedPaths.push(repoFilePath);
+    }
+
+    // 5. Open Pull Request
+    const prRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/pulls`, {
+      method: 'POST',
+      headers: ghHeaders,
       body: JSON.stringify({
-        title: `fix: ArchitectAI security & code quality improvements (${committedFiles.length} file${committedFiles.length > 1 ? 's' : ''})`,
+        title: `ArchitectAI: Automated Code & Security Fixes (${committedPaths.length} file${committedPaths.length > 1 ? 's' : ''})`,
         head: branchName,
         base: targetBase,
-        body: prBody,
+        body: [
+          '### Automated Fixes by ArchitectAI',
+          '',
+          `Patched **${committedPaths.length}** file(s) verified in the ArchitectAI sandbox:`,
+          ...committedPaths.map((p) => `- \`${p}\``),
+        ].join('\n'),
       }),
     });
+    const prData = await prRes.json();
+    if (!prRes.ok) {
+      return res.status(prRes.status).json({
+        success: false,
+        error: prData.message || 'Branch created, but failed to open Pull Request.',
+      });
+    }
 
-    res.status(200).json({
+    return res.json({
       success: true,
-      prUrl: pr.html_url,
-      prNumber: pr.number,
       branch: branchName,
-      filesCount: committedFiles.length,
+      prNumber: prData.number,
+      prUrl: prData.html_url,
     });
-  } catch (error) {
-    console.error('GitHub PR error:', error.message);
-    const status = error.status === 401 || error.status === 403 ? error.status : 502;
-    res.status(status).json({
-      success: false,
-      error:
-        error.status === 404 || error.status === 403
-          ? 'Permission denied or repository not found. Ensure you own or have write access to this repository.'
-          : error.message || 'Failed to create Pull Request on GitHub.',
-    });
+  } catch (err) {
+    console.error('Push PR Error:', err);
+    return res.status(500).json({ success: false, error: 'Server error while pushing Pull Request.' });
   }
 };
