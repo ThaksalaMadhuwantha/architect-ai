@@ -30,17 +30,7 @@ body { margin: 0; background: #050816; }
 .reveal { opacity: 0; transform: translateY(28px) scale(.98); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
 .reveal.in { opacity: 1; transform: none; }
 
-/* ---------- Cursor ---------- */
-.spotlight { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(520px circle at var(--mx, 50%) var(--my, 30%), rgba(99,102,241,.14), transparent 60%); }
-.cursor-dot, .cursor-ring { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 100; opacity: 0; border-radius: 50%; }
-.cursor-dot { width: 7px; height: 7px; background: #fff; box-shadow: 0 0 12px 2px rgba(129,140,248,.9); }
-.cursor-ring { width: 38px; height: 38px; border: 1.5px solid rgba(129,140,248,.7); transition: width .2s, height .2s, background .2s, border-color .2s; }
-.cursor-ring.is-active { width: 64px; height: 64px; background: rgba(99,102,241,.12); border-color: rgba(165,180,252,.9); }
-.click-burst { position: fixed; z-index: 100; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #818cf8; pointer-events: none; animation: burst .65s ease-out forwards; }
-@keyframes burst { to { transform: scale(4); opacity: 0; } }
-
 /* ---------- Buttons & nav ---------- */
-.magnetic { transition: transform .25s cubic-bezier(.2,.7,.2,1), background-color .2s; }
 .btn-glow { animation: glow-pulse 2.6s ease-in-out infinite; }
 @keyframes glow-pulse { 0%, 100% { box-shadow: 0 0 18px rgba(37,99,235,.45); } 50% { box-shadow: 0 0 30px rgba(99,102,241,.6); } }
 
@@ -56,14 +46,17 @@ body { margin: 0; background: #050816; }
 .tilt-card { position: relative; overflow: hidden; transition: transform .25s ease-out; will-change: transform; }
 .tilt-card::before, .tilt-card::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .3s; }
 .tilt-card::before { background: radial-gradient(280px circle at var(--px, 50%) var(--py, 50%), rgba(99,120,255,.2), transparent 60%); }
-.tilt-card::after { padding: 1px; background: radial-gradient(220px circle at var(--px, 50%) var(--py, 50%), rgba(150,170,255,.95), transparent 70%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.tilt-card::after {
+  padding: 1px;
+  background: radial-gradient(220px circle at var(--px, 50%) var(--py, 50%), rgba(150,170,255,.95), transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
 .tilt-card:hover::before, .tilt-card:hover::after { opacity: 1; }
 .tilt-card .icon-box { transition: transform .35s cubic-bezier(.2,.7,.2,1); }
-.tilt-card:hover .icon-box { transform: rotate(-8deg) scale(1.12); }
-.tilt-card li { transition: transform .3s ease; }
-.tilt-card:hover li { transform: translateX(6px); }
-.tilt-card li:nth-child(2) { transition-delay: .06s; }
-.tilt-card li:nth-child(3) { transition-delay: .12s; }
+.tilt-card:hover .icon-box { transform: rotate(-6deg) scale(1.08); }
 
 /* ---------- Graph preview (SVG) ---------- */
 .node-float { animation: float-node 5s ease-in-out infinite; }
