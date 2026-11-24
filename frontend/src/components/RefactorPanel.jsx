@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Sparkles, ShieldAlert, Code2, Zap, ShieldCheck, Check, RotateCcw,
-  Copy, GitPullRequest, Download, ExternalLink, Maximize2, X, GitBranch, Info,
+  Copy, GitPullRequest, Download, ExternalLink, Maximize2, X, GitBranch, Info, AlertTriangle,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -180,7 +180,10 @@ export default function RefactorPanel({
         setPrResult(res.data);
       }
     } catch (err) {
-      if (err.response?.status === 401) return onUnauthorized();
+      if (err.response?.status === 401) {
+        setPrError('Your GitHub session has expired. Please reconnect GitHub and try again.');
+        return;
+      }
       setPrError(err.response?.data?.error || 'Failed to create Pull Request on GitHub.');
     } finally {
       setPrBusy(false);
@@ -254,7 +257,7 @@ export default function RefactorPanel({
                 type="button"
                 onClick={handlePushPR}
                 disabled={prBusy || !githubToken}
-                title={!githubToken ? 'Sign in with GitHub to create Pull Requests' : 'Create branch & open Pull Request'}
+                title={!githubToken ? 'Connect GitHub to create Pull Requests' : 'Create branch & open Pull Request'}
                 className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <GitPullRequest className="w-4 h-4" />
@@ -273,13 +276,21 @@ export default function RefactorPanel({
           </div>
 
           {!githubToken && repoMeta?.source === 'github' && (
-            <button
-              type="button"
-              onClick={onConnectGithub}
-              className="w-full py-1.5 px-3 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-[11px] font-medium text-indigo-200 flex items-center justify-center gap-1.5"
-            >
-              Connect GitHub Account to Push PR
-            </button>
+            <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2.5 space-y-2 text-[11px] text-amber-200">
+              <p className="flex items-start gap-1.5 leading-relaxed">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  You are signed in without GitHub access. You can still apply fixes and download the patched ZIP, but <b>creating a Pull Request</b> requires connecting your GitHub account.
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={onConnectGithub}
+                className="w-full py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white flex items-center justify-center gap-1.5 transition-colors"
+              >
+                Connect GitHub Account to Push PR
+              </button>
+            </div>
           )}
 
           {prError && (

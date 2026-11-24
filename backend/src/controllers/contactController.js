@@ -24,6 +24,9 @@ const sendNotificationEmail = async ({ name, email, subject, message }) => {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: { user, pass },
+    tls: {
+      rejectUnauthorized: false,
+    },
   });
 
   await transporter.sendMail({

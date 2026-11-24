@@ -9,27 +9,32 @@ import { mapEndpoints } from '../utils/endpointMapper.js';
 import { collectManifests } from '../utils/depsCollector.js';
 import { analyzeArchitecture } from '../utils/architectureAnalyzer.js';
 
-const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // GitHub ZIP එකේ උපරිම size (50MB)
-const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024; // extract කළාම උපරිම size
-const MAX_FILES = 600; // graph එකට ගන්න උපරිම files ගාණ
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // Max GitHub ZIP size (50MB)
+const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024; // Max extracted size
+const MAX_FILES = 600; // Max files included in graph
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage']);
 
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
 const sendError = (res, error, fallback) => {
   console.error('Parsing error:', error);
   const status = error.status || 500;
-  res.status(status).json({ success: false, error: error.status ? error.message : fallback });
+  res.status(status).json({
+    success: false,
+    error: error.status ? error.message : fallback,
+    ...(error.code ? { code: error.code } : {}),
+  });
 };
 
 const normalizePath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
 
-/* ---------- ZIP එකකින් graph එක හදන core logic (upload සහ GitHub දෙකටම) ---------- */
+/* ---------- Core graph builder from ZIP (shared by upload and GitHub) ---------- */
 const buildGraphFromZip = async (zipPath) => {
   const extractDir = path.join('extracted', `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
 
@@ -38,20 +43,20 @@ const buildGraphFromZip = async (zipPath) => {
     try {
       zip = new AdmZip(zipPath);
     } catch {
-      throw new HttpError(400, 'ZIP file එක කියවන්න බැහැ. Valid ZIP එකක්ද බලන්න.');
+      throw new HttpError(400, 'Unable to read ZIP file. Please upload a valid ZIP archive.');
     }
 
-    // Zip-slip සහ zip-bomb වලින් ආරක්ෂාව
+    // Protect against zip-slip and zip-bomb attacks
     let totalSize = 0;
     for (const entry of zip.getEntries()) {
       const name = entry.entryName.replace(/\\/g, '/');
       if (name.startsWith('/') || name.split('/').includes('..')) {
-        throw new HttpError(400, 'ZIP file එකේ අනාරක්ෂිත paths තියෙනවා.');
+        throw new HttpError(400, 'ZIP archive contains unsafe file paths.');
       }
       totalSize += entry.header.size;
     }
     if (totalSize > MAX_UNZIPPED_BYTES) {
-      throw new HttpError(413, 'Project එක ඉතා විශාලයි (extract කළාම 300MB ට වැඩියි).');
+      throw new HttpError(413, 'Project is too large (exceeds 300MB extracted size).');
     }
 
     zip.extractAllTo(extractDir, true);
@@ -62,9 +67,9 @@ const buildGraphFromZip = async (zipPath) => {
     const rawEdges = [];
     let idCounter = 1;
     let truncated = false;
-    let codeBudget = 5 * 1024 * 1024; // response එකට යන full code වල මුළු සීමාව
-    const scanEntries = []; // security scan ප්‍රතිඵල
-    const sources = []; // endpoint mapper එකට: සියලුම files වල සම්පූර්ණ code
+    let codeBudget = 5 * 1024 * 1024; // Total code payload budget in response
+    const scanEntries = [];
+    const sources = [];
 
     const collectFiles = (dir) => {
       const files = fs.readdirSync(dir);
@@ -94,7 +99,7 @@ const buildGraphFromZip = async (zipPath) => {
           const code = codeBudget > 0 ? fileContent.slice(0, 20000) : '';
           codeBudget -= code.length;
 
-          // Parse කරන්න බැරි file එකක් නිසා මුළු repo එකම fail වෙන්න දෙන්නේ නෑ
+          // Skip single-file AST parse failures without failing the whole repo
           let imports = [];
           let exports = [];
           try {
@@ -139,7 +144,6 @@ const buildGraphFromZip = async (zipPath) => {
 
     collectFiles(extractDir);
 
-    // Repo මට්ටමේ rules, ඊට පස්සේ node එකක් ගානේ බරපතලම severity එක සහ සාරාංශය
     scanRepoLevel(scanEntries);
 
     // Endpoint map + auth coverage (route -> middleware -> controller -> model)
@@ -192,7 +196,6 @@ const buildGraphFromZip = async (zipPath) => {
       }
     });
 
-    // Architecture health: cycles, layer violations, god files (edges හැදුවාට පස්සේ)
     let arch = null;
     try { arch = analyzeArchitecture(nodes, edges); } catch (err) { console.warn('Architecture analysis skipped:', err.message); }
 
@@ -208,14 +211,14 @@ const buildGraphFromZip = async (zipPath) => {
 /* ---------- 1. ZIP upload ---------- */
 export const parseZipFile = async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ success: false, error: 'කරුණාකර ZIP file එකක් upload කරන්න.' });
+    return res.status(400).json({ success: false, error: 'Please upload a valid ZIP file.' });
   }
 
   try {
     const { nodes, edges, truncated, scan, flow, manifests, arch } = await buildGraphFromZip(req.file.path);
     res.status(200).json({ success: true, data: { nodes, edges }, meta: { truncated, scan, flow, manifests, arch } });
   } catch (error) {
-    sendError(res, error, 'ZIP file එක parse කිරීමේදී දෝෂයක් සිදු විය.');
+    sendError(res, error, 'Failed to parse the uploaded ZIP file.');
   } finally {
     await fs.remove(req.file.path);
   }
@@ -231,37 +234,71 @@ const parseGithubUrl = (url) => {
   return { owner: m[1], repo: m[2], branch: m[3] || null };
 };
 
-const downloadRepoZip = async ({ owner, repo, branch }, dest) => {
-  const ref = branch ? `/${branch.split('/').map(encodeURIComponent).join('/')}` : '';
-  const url = `https://api.github.com/repos/${owner}/${repo}/zipball${ref}`;
-
+const fetchGithubZip = async (url, token) => {
   const headers = {
     'User-Agent': 'ArchitectAI',
     Accept: 'application/vnd.github+json',
   };
-  // Optional: rate limit වැඩි කරගන්න. PUBLIC repos විතරක් කියවන්න පුළුවන් token එකක් පාවිච්චි කරන්න.
-  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return fetch(url, { headers, signal: AbortSignal.timeout(60000) });
+};
+
+const downloadRepoZip = async ({ owner, repo, branch, githubToken }, dest) => {
+  const ref = branch ? `/${branch.split('/').map(encodeURIComponent).join('/')}` : '';
+  const url = `https://api.github.com/repos/${owner}/${repo}/zipball${ref}`;
+
+  const userToken = (githubToken || '').trim();
+  const activeToken = userToken || process.env.GITHUB_TOKEN || '';
+  let tokenExpired = false;
 
   let response;
   try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(60000) });
+    response = await fetchGithubZip(url, activeToken);
+
+    // If the user's OAuth token expired (401), retry anonymously so public repos still work seamlessly
+    if (response.status === 401 && activeToken) {
+      tokenExpired = true;
+      response = await fetchGithubZip(url, process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN !== activeToken ? process.env.GITHUB_TOKEN : '');
+    }
   } catch {
-    throw new HttpError(504, 'GitHub එකට සම්බන්ධ වෙන්න බැරි වුණා. පසුව නැවත උත්සාහ කරන්න.');
+    throw new HttpError(504, 'Unable to connect to GitHub. Please try again later.');
   }
 
+  if (response.status === 401) {
+    throw new HttpError(
+      401,
+      'Your GitHub session has expired. Please reconnect GitHub to access private repositories.',
+      'GITHUB_TOKEN_EXPIRED'
+    );
+  }
   if (response.status === 404) {
-    throw new HttpError(404, 'Repo එක හොයාගන්න බැහැ. URL එක හරිද, repo එක public ද කියලා බලන්න.');
+    if (tokenExpired) {
+      throw new HttpError(
+        401,
+        'Your GitHub session expired and this repository is private or unavailable. Reconnect GitHub to continue.',
+        'GITHUB_TOKEN_EXPIRED'
+      );
+    }
+    throw new HttpError(
+      404,
+      userToken
+        ? 'Repository not found. Check the URL, branch name, and whether your GitHub account has access.'
+        : 'Repository not found or private. If this is a private repository, connect your GitHub account to access it.',
+      userToken ? 'REPO_NOT_FOUND' : 'PRIVATE_OR_NOT_FOUND'
+    );
   }
   if (response.status === 403 || response.status === 429) {
-    throw new HttpError(429, 'GitHub rate limit එකට ලැබුණා. ටික වෙලාවකින් නැවත උත්සාහ කරන්න.');
+    throw new HttpError(429, 'GitHub API rate limit or permission error. Please try again shortly.');
   }
   if (!response.ok || !response.body) {
-    throw new HttpError(502, `GitHub එකෙන් repo එක download කරන්න බැරි වුණා (${response.status}).`);
+    throw new HttpError(502, `Failed to download repository from GitHub (HTTP ${response.status}).`);
   }
 
   const declared = Number(response.headers.get('content-length'));
   if (declared && declared > MAX_DOWNLOAD_BYTES) {
-    throw new HttpError(413, 'Repo එක ඉතා විශාලයි (50MB ට වැඩියි).');
+    throw new HttpError(413, 'Repository archive is too large (exceeds 50MB limit).');
   }
 
   let received = 0;
@@ -269,7 +306,7 @@ const downloadRepoZip = async ({ owner, repo, branch }, dest) => {
     transform(chunk, _enc, cb) {
       received += chunk.length;
       if (received > MAX_DOWNLOAD_BYTES) {
-        cb(new HttpError(413, 'Repo එක ඉතා විශාලයි (50MB ට වැඩියි).'));
+        cb(new HttpError(413, 'Repository archive is too large (exceeds 50MB limit).'));
       } else {
         cb(null, chunk);
       }
@@ -277,44 +314,58 @@ const downloadRepoZip = async ({ owner, repo, branch }, dest) => {
   });
 
   await pipeline(Readable.fromWeb(response.body), limiter, fs.createWriteStream(dest));
+  return { tokenExpired };
 };
 
 export const parseGithubRepo = async (req, res) => {
-  const { repoUrl, branch } = req.body || {};
+  const { repoUrl, branch, githubToken } = req.body || {};
   const target = parseGithubUrl(repoUrl);
 
   if (!target) {
     return res.status(400).json({
       success: false,
-      error: 'වලංගු GitHub URL එකක් දෙන්න. උදා: https://github.com/user/repo',
+      error: 'Please enter a valid GitHub repository URL (e.g., https://github.com/user/repo).',
     });
   }
 
   if (branch) {
     if (!/^[\w.\-/]+$/.test(branch)) {
-      return res.status(400).json({ success: false, error: 'Branch නම වලංගු නැහැ.' });
+      return res.status(400).json({ success: false, error: 'Invalid branch name.' });
     }
     target.branch = branch;
+  }
+
+  if (githubToken && typeof githubToken === 'string') {
+    target.githubToken = githubToken;
   }
 
   await fs.ensureDir('uploads');
   const zipPath = path.join('uploads', `gh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.zip`);
 
   try {
-    await downloadRepoZip(target, zipPath);
+    const { tokenExpired } = await downloadRepoZip(target, zipPath);
     const { nodes, edges, truncated, scan, flow, manifests, arch } = await buildGraphFromZip(zipPath);
 
     if (nodes.length === 0) {
-      throw new HttpError(422, 'මේ repo එකේ JS/TS files (.js, .jsx, .ts, .tsx) හොයාගන්න බැරි වුණා.');
+      throw new HttpError(422, 'No JavaScript or TypeScript files (.js, .jsx, .ts, .tsx) were found in this repository.');
     }
 
     res.status(200).json({
       success: true,
       data: { nodes, edges },
-      meta: { source: 'github', repo: `${target.owner}/${target.repo}`, truncated, scan, flow, manifests, arch },
+      meta: {
+        source: 'github',
+        repo: `${target.owner}/${target.repo}`,
+        tokenExpired,
+        truncated,
+        scan,
+        flow,
+        manifests,
+        arch,
+      },
     });
   } catch (error) {
-    sendError(res, error, 'GitHub repo එක analyze කිරීමේදී දෝෂයක් සිදු විය.');
+    sendError(res, error, 'Failed to analyze the GitHub repository.');
   } finally {
     await fs.remove(zipPath);
   }

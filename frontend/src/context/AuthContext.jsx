@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { clearWorkspaceDraft } from '../lib/workspaceDraft';
 
 const AuthContext = createContext(null);
 const GH_TOKEN_KEY = 'architect_ai_gh_token';
@@ -23,11 +24,18 @@ export function AuthProvider({ children }) {
   const [githubToken, setGithubToken] = useState(() => sessionStorage.getItem(GH_TOKEN_KEY) || '');
   const [loading, setLoading] = useState(true);
 
+  // Persist GitHub provider_token in sessionStorage when returned by Supabase
   const syncProviderToken = (activeSession) => {
     if (activeSession?.provider_token) {
       sessionStorage.setItem(GH_TOKEN_KEY, activeSession.provider_token);
       setGithubToken(activeSession.provider_token);
     }
+  };
+
+  // Clear stale or expired GitHub token without logging the user out of the app
+  const clearGithubToken = () => {
+    sessionStorage.removeItem(GH_TOKEN_KEY);
+    setGithubToken('');
   };
 
   useEffect(() => {
@@ -73,16 +81,46 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   };
 
+  // Link GitHub to the existing Google/Email session if enabled, otherwise fallback to OAuth sign-in
+  const connectGithub = async () => {
+    if (session && typeof supabase.auth.linkIdentity === 'function') {
+      const { error } = await supabase.auth.linkIdentity({
+        provider: 'github',
+        options: {
+          redirectTo: `${window.location.origin}/app`,
+          scopes: 'read:user user:email repo',
+        },
+      });
+      if (!error) return;
+      console.warn('Identity linking unavailable, falling back to GitHub OAuth:', error.message);
+    }
+    await loginWithOAuth('github');
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     sessionStorage.removeItem(GH_TOKEN_KEY);
+    await clearWorkspaceDraft();
     setGithubToken('');
     setUser(null);
     setSession(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, githubToken, loading, login, register, loginWithOAuth, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        githubToken,
+        loading,
+        login,
+        register,
+        loginWithOAuth,
+        connectGithub,
+        clearGithubToken,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
