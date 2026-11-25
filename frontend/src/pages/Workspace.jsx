@@ -8,7 +8,7 @@ import dagre from '@dagrejs/dagre';
 import JSZip from 'jszip';
 import {
   UploadCloud, FileCode, Folder, ChevronRight, ChevronDown, Search, Sparkles, LogOut,
-  Lock, ShieldCheck, Network, Wrench, ArrowRightLeft, Code2, X, Maximize2, GitBranch,
+  Lock, ShieldCheck, Network, Wrench, ArrowRightLeft, Code2, X, Maximize2, Minimize2, GitBranch,
   PanelLeftClose, PanelLeftOpen, Columns2, MessageSquare, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import api from '../lib/api';
@@ -172,6 +172,8 @@ export default function Workspace() {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
   const [mobileTab, setMobileTab] = useState('graph');
+  const [graphFocus, setGraphFocus] = useState(false);
+  const graphFocusTimer = useRef(null);
   const [centerView, setCenterView] = useState('graph');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [avatarErr, setAvatarErr] = useState(false);
@@ -354,6 +356,25 @@ export default function Workspace() {
   }, [loadOpen, auditOpen]);
 
   const handleLogout = () => { logout(); navigate('/'); };
+
+  const handleGraphInteractStart = () => {
+    if (window.innerWidth >= 1024 || mobileTab !== 'graph' || nodes.length === 0) return;
+    if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
+    setGraphFocus(true);
+  };
+
+  const handleGraphInteractEnd = () => {
+    if (window.innerWidth >= 1024) return;
+    if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
+    graphFocusTimer.current = setTimeout(() => setGraphFocus(false), 2200);
+  };
+
+  useEffect(() => {
+    if (mobileTab !== 'graph') setGraphFocus(false);
+    return () => {
+      if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
+    };
+  }, [mobileTab]);
 
   const selectFile = (id, openCodeView = false) => {
     setSelectedId(id);
@@ -1036,7 +1057,13 @@ export default function Workspace() {
   return (
     <div className="h-dvh flex flex-col bg-[#040714] bg-[radial-gradient(ellipse_at_top,_rgba(59,130,246,0.12),_transparent_55%)] text-slate-100 font-sans overflow-hidden">
       {/* ===== Floating Glassmorphism Navbar ===== */}
-      <header className="sticky top-0 z-30 shrink-0 px-2.5 sm:px-4 pt-2 sm:pt-3">
+      <header
+        className={`sticky top-0 z-30 shrink-0 px-2.5 sm:px-4 transition-all duration-300 ease-out ${
+          graphFocus
+            ? 'max-h-0 opacity-0 pt-0 overflow-hidden pointer-events-none lg:max-h-40 lg:opacity-100 lg:pt-3 lg:overflow-visible lg:pointer-events-auto'
+            : 'max-h-40 opacity-100 pt-2 sm:pt-3'
+        }`}
+      >
         <div className="h-14 px-3 sm:px-4 rounded-2xl border border-white/10 bg-[#070c24]/75 backdrop-blur-xl shadow-[0_8px_32px_rgba(2,6,23,0.65)] flex items-center justify-between gap-2">
           {/* Left: Sidebar Toggle + Brand + Active Repo Pill */}
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -1305,6 +1332,21 @@ export default function Workspace() {
               <Network className="w-3.5 h-3.5 text-indigo-400" /> Dependency Graph
             </div>
 
+            {/* Mobile Graph Fullscreen / Focus Toggle */}
+            {nodes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
+                  setGraphFocus((v) => !v);
+                }}
+                title={graphFocus ? 'Show navigation' : 'Full screen graph'}
+                className="lg:hidden absolute top-3 right-3.5 z-10 p-2 rounded-xl border border-white/15 bg-[#070c24]/85 backdrop-blur-md text-slate-200 hover:text-white shadow-lg"
+              >
+                {graphFocus ? <Minimize2 className="w-4 h-4 text-indigo-300" /> : <Maximize2 className="w-4 h-4 text-indigo-300" />}
+              </button>
+            )}
+
             {liveScan && (
               <div className="absolute top-3 right-3.5 z-10 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl border border-white/10 bg-[#070c24]/80 backdrop-blur-md text-[11px] text-slate-300 pointer-events-none">
                 <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-emerald-500" /> Safe</span>
@@ -1329,6 +1371,8 @@ export default function Workspace() {
               onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
               onNodeClick={(_, n) => selectFile(n.id, false)}
               onNodeDoubleClick={(_, n) => selectFile(n.id, true)}
+              onMoveStart={handleGraphInteractStart}
+              onMoveEnd={handleGraphInteractEnd}
               fitView fitViewOptions={{ padding: 0.15 }} minZoom={0.1} proOptions={{ hideAttribution: true }}>
               <Background color="#334155" gap={18} />
               <Controls showInteractive={false} />
@@ -1500,7 +1544,13 @@ export default function Workspace() {
       </div>
 
       {/* ===== Mobile Floating Glass Bottom Navigation ===== */}
-      <nav className="lg:hidden shrink-0 px-2.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+      <nav
+        className={`lg:hidden shrink-0 px-2.5 transition-all duration-300 ease-out ${
+          graphFocus
+            ? 'max-h-0 opacity-0 pb-0 overflow-hidden pointer-events-none'
+            : 'max-h-32 opacity-100 pb-[calc(3.25rem+env(safe-area-inset-bottom))]'
+        }`}
+      >
         <div className="grid grid-cols-4 rounded-2xl border border-white/10 bg-[#070c24]/85 backdrop-blur-xl shadow-lg p-1">
           {MOBILE_TABS.map(([id, label, Icon]) => (
             <button
