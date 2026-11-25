@@ -325,12 +325,12 @@ export default function LandingPage() {
   };
 
   return (
-    <div id="home" className="relative min-h-screen bg-[#050816] text-slate-100 font-sans overflow-x-hidden">
+    <div id="home" className="relative min-h-screen bg-[#050816] text-slate-100 font-sans overflow-x-clip">
       <ParticleField />
 
-      {/* Navbar */}
-      <header className="sticky top-0 z-40 px-4 pt-3 bg-[#050816]/75 backdrop-blur-md">
-        <nav className="max-w-7xl mx-auto rounded-2xl border border-blue-500/30 bg-[#070c24]/90 px-4 sm:px-6 py-3 shadow-lg">
+      {/* Fixed Glassmorphism Navbar */}
+      <header className="fixed top-0 inset-x-0 z-50 px-4 pt-3 pointer-events-none">
+        <nav className="pointer-events-auto max-w-7xl mx-auto rounded-2xl border border-blue-500/30 bg-[#070c24]/85 backdrop-blur-xl px-4 sm:px-6 py-3 shadow-[0_8px_32px_rgba(2,6,23,0.65)]">
           <div className="flex items-center justify-between">
             <a href="#home" className="shrink-0">
               <Logo size={34} />
@@ -429,7 +429,7 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="relative z-10 max-w-7xl mx-auto px-6 pt-14 pb-20 grid lg:grid-cols-2 gap-12 items-center">
+      <section className="relative z-10 max-w-7xl mx-auto px-6 pt-28 sm:pt-32 pb-20 grid lg:grid-cols-2 gap-12 items-center">
         <div className="aurora -z-10 w-[420px] h-[420px] bg-blue-600 -top-10 -left-24" />
         <div className="aurora -z-10 w-[380px] h-[380px] bg-indigo-500 top-40 right-0" style={{ animationDelay: '-6s' }} />
 

@@ -1,7 +1,22 @@
 @import "tailwindcss";
 
-html { scroll-behavior: smooth; }
-body { margin: 0; background: #050816; }
+/* Configure Switzer as the primary sans-serif font across Tailwind v4 */
+@theme {
+  --font-sans: "Switzer", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background: #050816;
+  font-family: var(--font-sans);
+}
 
 /* ---------- Text & backgrounds ---------- */
 .gradient-text {
