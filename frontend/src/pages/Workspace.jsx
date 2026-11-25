@@ -370,11 +370,16 @@ export default function Workspace() {
   };
 
   useEffect(() => {
-    if (mobileTab !== 'graph') setGraphFocus(false);
     return () => {
       if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
     };
-  }, [mobileTab]);
+  }, []);
+
+  const handleMobileTabChange = (tabId) => {
+    if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
+    setGraphFocus(false);
+    setMobileTab(tabId);
+  };
 
   const selectFile = (id, openCodeView = false) => {
     setSelectedId(id);
@@ -385,7 +390,7 @@ export default function Workspace() {
     if (openCodeView && centerView === 'graph') {
       setCenterView('split');
     }
-    if (window.innerWidth < 1024) setMobileTab('code');
+    if (window.innerWidth < 1024) handleMobileTabChange('code');
   };
 
   const handleApplyPatch = (nodeId, patchedCode) => {
@@ -504,7 +509,7 @@ export default function Workspace() {
     setCenterView('graph');
     setProjectName(name);
     setLoadOpen(false);
-    setMobileTab('graph');
+    handleMobileTabChange('graph');
 
     // Clear stale GitHub token if backend reported it expired during a public repo fallback
     const hasValidGithub = !!githubToken && !meta?.tokenExpired;
@@ -1053,13 +1058,14 @@ export default function Workspace() {
   const userInitial = (user?.name || user?.email || 'D').charAt(0).toUpperCase();
   const showGraphPane = centerView === 'graph' || centerView === 'split';
   const showCodePane = centerView === 'code' || centerView === 'split';
+  const isGraphFocused = graphFocus && mobileTab === 'graph';
 
   return (
     <div className="h-dvh flex flex-col bg-[#040714] bg-[radial-gradient(ellipse_at_top,_rgba(59,130,246,0.12),_transparent_55%)] text-slate-100 font-sans overflow-hidden">
       {/* ===== Floating Glassmorphism Navbar ===== */}
       <header
         className={`sticky top-0 z-30 shrink-0 px-2.5 sm:px-4 transition-all duration-300 ease-out ${
-          graphFocus
+          isGraphFocused
             ? 'max-h-0 opacity-0 pt-0 overflow-hidden pointer-events-none lg:max-h-40 lg:opacity-100 lg:pt-3 lg:overflow-visible lg:pointer-events-auto'
             : 'max-h-40 opacity-100 pt-2 sm:pt-3'
         }`}
@@ -1340,10 +1346,10 @@ export default function Workspace() {
                   if (graphFocusTimer.current) clearTimeout(graphFocusTimer.current);
                   setGraphFocus((v) => !v);
                 }}
-                title={graphFocus ? 'Show navigation' : 'Full screen graph'}
+                title={isGraphFocused ? 'Show navigation' : 'Full screen graph'}
                 className="lg:hidden absolute top-3 right-3.5 z-10 p-2 rounded-xl border border-white/15 bg-[#070c24]/85 backdrop-blur-md text-slate-200 hover:text-white shadow-lg"
               >
-                {graphFocus ? <Minimize2 className="w-4 h-4 text-indigo-300" /> : <Maximize2 className="w-4 h-4 text-indigo-300" />}
+                {isGraphFocused ? <Minimize2 className="w-4 h-4 text-indigo-300" /> : <Maximize2 className="w-4 h-4 text-indigo-300" />}
               </button>
             )}
 
@@ -1546,7 +1552,7 @@ export default function Workspace() {
       {/* ===== Mobile Floating Glass Bottom Navigation ===== */}
       <nav
         className={`lg:hidden shrink-0 px-2.5 transition-all duration-300 ease-out ${
-          graphFocus
+          isGraphFocused
             ? 'max-h-0 opacity-0 pb-0 overflow-hidden pointer-events-none'
             : 'max-h-32 opacity-100 pb-[calc(3.25rem+env(safe-area-inset-bottom))]'
         }`}
@@ -1555,7 +1561,7 @@ export default function Workspace() {
           {MOBILE_TABS.map(([id, label, Icon]) => (
             <button
               key={id}
-              onClick={() => setMobileTab(id)}
+              onClick={() => handleMobileTabChange(id)}
               className={`py-2 rounded-xl flex flex-col items-center gap-0.5 text-[11px] font-medium transition-colors ${
                 mobileTab === id ? 'bg-indigo-600/25 text-indigo-200' : 'text-slate-400 hover:text-slate-200'
               }`}
